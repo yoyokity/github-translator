@@ -1,15 +1,11 @@
 /**
  * @file src/features/discussion-translation.ts
- * Issue / PR / Release 讨论区双向翻译：工具条注入、双栏对照与 DOM 克隆
+ * Issue / PR / Release 讨论区翻译
  */
 
-import {
-    AI_CHAT_PROVIDERS,
-    FeatureSet,
-    ISSUE_PR_CONFIG,
-    README_CONFIG,
-    issuePrRuntime,
-} from '../core/constants';
+import { ISSUE_PR_CONFIG, README_CONFIG } from '../core/constants';
+import { AI_CHAT_PROVIDERS } from '../core/provider-protocol';
+import { FeatureSet, issuePrRuntime } from '../core/state';
 import {
     appendReadmeTranslationRecord,
     getCurrentRepoInfo,
@@ -22,7 +18,7 @@ import {
     shouldSkipReadmeByLanguage,
     shouldSkipReadmeText,
 } from '../core/text-filter';
-import { containsObjectObjectArtifact, createHash, truncateText } from '../core/utils';
+import { isObjectObjectArtifact, createHash, truncateText } from '../core/utils';
 import {
     applyTaskTranslations,
     applyTextGroupTranslations,
@@ -33,6 +29,7 @@ import {
 import { translateTextsWithProvider } from '../providers/dispatcher';
 import { getProviderConfig } from '../providers/provider-config';
 
+/** 是否 Issue/PR 讨论页 */
 export function isIssueOrPrDiscussionPage() {
     if (window.location.hostname !== 'github.com') return false;
     return /^\/[^/]+\/[^/]+\/(?:issues|pull|discussions)\/\d+(?:\/|$)/.test(
@@ -40,6 +37,7 @@ export function isIssueOrPrDiscussionPage() {
     );
 }
 
+/** 是否 Release 页面 */
 export function isReleaseNotesPage() {
     if (window.location.hostname !== 'github.com') return false;
 
@@ -48,10 +46,12 @@ export function isReleaseNotesPage() {
     return /^\/[^/]+\/[^/]+\/releases(?:\/(?:tag\/[^/]+|latest))?(?:\/|$)/.test(pathname);
 }
 
+/** 是否翻译目标页 */
 export function isDiscussionTranslationTargetPage() {
     return isIssueOrPrDiscussionPage() || isReleaseNotesPage();
 }
 
+/** 是否启用讨论翻译 */
 export function isIssuePrTranslationEnabled() {
     return (
         FeatureSet.enable_extension &&
@@ -60,6 +60,7 @@ export function isIssuePrTranslationEnabled() {
     );
 }
 
+/** 当前讨论类型 */
 export function getIssuePrRecordSourceType() {
     if (isReleaseNotesPage()) return 'release';
 
@@ -72,10 +73,12 @@ export function getIssuePrRecordSourceType() {
     return 'issue';
 }
 
+/** 记录来源类型 */
 export function getDiscussionRecordSourceType(item: any) {
     return item?.sourceType || getIssuePrRecordSourceType();
 }
 
+/** 获取讨论状态 */
 export function getIssuePrDiscussionState(item: any) {
     const keyEl = item?.markdownEl || item;
     if (!issuePrRuntime.stateByElement.has(keyEl)) {
@@ -94,6 +97,7 @@ export function getIssuePrDiscussionState(item: any) {
     return issuePrRuntime.stateByElement.get(keyEl);
 }
 
+/** 查找所有讨论条目 */
 export function findDiscussionItems() {
     const seen = new Set();
     const isReleaseNotes = isReleaseNotesPage();
@@ -168,14 +172,7 @@ export function findDiscussionItems() {
         .filter(Boolean);
 }
 
-export function getIssuePrCommentBodies() {
-    return findDiscussionItems()
-        .map((item: any) => item.markdownEl)
-        .filter((bodyEl: any) => {
-            return normalizeText(bodyEl.textContent || '').length > 0;
-        });
-}
-
+/** 查找工具栏插入位置 */
 export function findDiscussionActionsSlot(item: any) {
     if (item?.sourceType === 'release') return null;
 
@@ -199,8 +196,7 @@ export function findDiscussionActionsSlot(item: any) {
         return null;
     };
 
-    // 回复评论可能嵌套在同一个 timeline-comment-group 中；从正文向上查找，
-    // 优先使用当前评论自己的操作菜单，避免误用父评论或标题区域的 flex 容器。
+    // 优先就近评论菜单
     let menuButton = null;
     let scope = item.markdownEl?.parentElement;
     while (scope && rootEl.contains(scope)) {
@@ -211,17 +207,15 @@ export function findDiscussionActionsSlot(item: any) {
     }
     menuButton ||= findMenuButton(rootEl);
 
-    // 新版 GitHub 把三个点放在 .timeline-comment-actions 内层的 flex 行中；
-    // 优先使用该行，避免插入块级外层后被换到上一行。
+    // 新版操作行
     const actionRow = menuButton?.closest('comment-actions-container')?.parentElement;
     if (actionRow) return actionRow;
 
-    // 兼容旧版直接把菜单放在 .timeline-comment-actions 下的结构。
+    // 旧版操作组
     const actionGroup = menuButton?.closest('.timeline-comment-actions');
     if (actionGroup) return actionGroup;
 
-    // 当前 React 评论头部会把三点按钮包在 ActionsButtonsContainer 中；
-    // 直接挂到该容器，才能让翻译按钮紧挨三点左侧，而不是排在贡献者标签之前。
+    // React 操作容器
     const menuButtonsContainer = menuButton?.closest('[class*="ActionsButtonsContainer"]');
     if (menuButtonsContainer) return menuButtonsContainer;
 
@@ -256,6 +250,7 @@ export function findDiscussionActionsSlot(item: any) {
     );
 }
 
+/** 生成讨论缓存键 */
 export function buildDiscussionCacheKey(item: any, sourceHash: any, signature: any) {
     const repoInfo = getCurrentRepoInfo();
     if (!repoInfo?.fullName || !sourceHash || !signature) return '';
@@ -282,6 +277,7 @@ export function buildDiscussionCacheKey(item: any, sourceHash: any, signature: a
     return `${repoInfo.fullName}|${discussionType}|${discussionNumber}|${commentId}|${sourceHash}|${signature}`;
 }
 
+/** 获取 Release 标识 */
 export function getReleaseIdentifier(item: any) {
     const pathname = String(window.location.pathname || '');
     const pathTag = pathname.match(/^\/[^/]+\/[^/]+\/releases\/tag\/(.+)$/)?.[1];
@@ -295,6 +291,7 @@ export function getReleaseIdentifier(item: any) {
     return pathname.replace(/^\/[^/]+\/[^/]+\/releases\/?/, '') || 'releases';
 }
 
+/** 注入讨论翻译样式 */
 export function injectIssuePrControlStyles() {
     if (document.getElementById('ghcn-discussion-translate-style')) return;
 
@@ -398,6 +395,7 @@ export function injectIssuePrControlStyles() {
     document.head.appendChild(style);
 }
 
+/** 调度讨论控件 */
 export function scheduleIssuePrTranslationControls(reason: any) {
     if (!FeatureSet.enable_extension) return;
 
@@ -411,6 +409,7 @@ export function scheduleIssuePrTranslationControls(reason: any) {
     }, ISSUE_PR_CONFIG.DEBOUNCE_MS);
 }
 
+/** 挂载讨论工具条 */
 export function setupIssuePrTranslationControls(_reason?: any) {
     if (!isIssuePrTranslationEnabled()) {
         restoreIssuePrTranslations();
@@ -424,6 +423,7 @@ export function setupIssuePrTranslationControls(_reason?: any) {
     });
 }
 
+/** 挂载单条工具条 */
 export function mountDiscussionToolbar(item: any) {
     const state = getIssuePrDiscussionState(item);
     const slotEl = findDiscussionActionsSlot(item);
@@ -433,15 +433,13 @@ export function mountDiscussionToolbar(item: any) {
     const toolbar = state.toolbarEl?.isConnected ? state.toolbarEl : existingToolbars[0] || null;
 
     if (toolbar) {
-        // React 可能替换正文节点但保留评论操作行；该新正文会有新的 WeakMap 状态，
-        // 因此先复用操作行中已有工具条，并清理旧扫描/旧状态留下的重复节点。
+        // 复用并清理重复工具条
         existingToolbars.forEach((existingToolbar: any) => {
             if (existingToolbar !== toolbar) existingToolbar.remove();
         });
         const needsRender = state.toolbarEl !== toolbar;
         state.toolbarEl = toolbar;
-        // GitHub 的 Turbo/React 重绘可能保留旧工具条节点；每次扫描都把它
-        // 重新归位到三个点所在的操作行，避免遗留在 header 顶部。
+        // 重新归位到操作行
         if (slotEl && toolbar.parentElement !== slotEl) {
             slotEl.insertBefore(toolbar, slotEl.firstChild);
         }
@@ -470,6 +468,7 @@ export function mountDiscussionToolbar(item: any) {
     item.markdownEl.dataset.ghcnDiscussionTranslate = 'ready';
 }
 
+/** 渲染工具条按钮 */
 export function renderDiscussionToolbar(item: any) {
     const state = getIssuePrDiscussionState(item);
     const toolbar = state.toolbarEl;
@@ -518,6 +517,7 @@ export function renderDiscussionToolbar(item: any) {
     }
 }
 
+/** 创建工具条按钮 */
 export function createDiscussionToolbarButton(label: any, title: any) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -529,6 +529,7 @@ export function createDiscussionToolbarButton(label: any, title: any) {
     return button;
 }
 
+/** 处理翻译按钮 */
 export async function handleIssuePrTranslateButton(item: any) {
     const state = getIssuePrDiscussionState(item);
     if (state.isBusy) return;
@@ -551,6 +552,7 @@ export async function handleIssuePrTranslateButton(item: any) {
     }
 }
 
+/** 显示错误 */
 export function renderIssuePrError(toolbar: any, message: any) {
     clearIssuePrError(toolbar);
 
@@ -561,12 +563,14 @@ export function renderIssuePrError(toolbar: any, message: any) {
     toolbar.appendChild(errorEl);
 }
 
+/** 清除错误 */
 export function clearIssuePrError(toolbar: any) {
     toolbar
         ?.querySelectorAll('[data-ghcn-discussion-translate="error"]')
         .forEach((el: any) => el.remove());
 }
 
+/** 恢复单条原文 */
 export function restoreIssuePrBody(itemOrBodyEl: any) {
     const item = itemOrBodyEl?.markdownEl ? itemOrBodyEl : { markdownEl: itemOrBodyEl };
     const state = getIssuePrDiscussionState(item);
@@ -579,6 +583,7 @@ export function restoreIssuePrBody(itemOrBodyEl: any) {
     renderDiscussionToolbar(item);
 }
 
+/** 恢复全部讨论 */
 export function restoreIssuePrTranslations() {
     document
         .querySelectorAll('[data-ghcn-discussion-translate="toolbar"]')
@@ -589,11 +594,13 @@ export function restoreIssuePrTranslations() {
     });
 }
 
+/** 翻译单条讨论 */
 export async function translateIssuePrBody(item: any) {
     const startAt = performance.now();
     const state = getIssuePrDiscussionState(item);
     const markdownEl = item.markdownEl;
 
+    // 原文变化则重置
     if (
         !state.originalHtml ||
         (state.translatedHash && createHash(markdownEl.innerHTML) !== state.translatedHash)
@@ -634,9 +641,10 @@ export async function translateIssuePrBody(item: any) {
     let translatedEl = createTranslatedClone(markdownEl);
     let partialCacheApplied = false;
     if (cacheHit?.translatedHtml) {
-        if (containsObjectObjectArtifact(cacheHit.translatedHtml)) {
+        if (isObjectObjectArtifact(cacheHit.translatedHtml)) {
             console.warn('[Issue/PR翻译] 忽略含有 [object Object] 的损坏仓库缓存');
         } else {
+            // 应用部分缓存
             replaceElementChildrenFromHtml(translatedEl, cacheHit.translatedHtml);
             const cachedRemaining = collectIssuePrTextTasks(translatedEl);
             if (!cachedRemaining.length) {
@@ -700,6 +708,7 @@ export async function translateIssuePrBody(item: any) {
     setDiscussionViewMode(item, 'translated');
 
     if (FeatureSet.readme_enable_progressive) {
+        // 按块渐进翻译
         const usesAiBatchLimits =
             AI_CHAT_PROVIDERS.includes(providerConfig.provider || '') ||
             providerConfig.provider === 'qwen_mt';
@@ -727,6 +736,7 @@ export async function translateIssuePrBody(item: any) {
             }
         }
     } else {
+        // 一次性批量翻译
         const { translatedMap, totalTokens: tokens } = await translateTextsWithProvider(
             uniqueTexts,
             providerConfig,
@@ -769,6 +779,7 @@ export async function translateIssuePrBody(item: any) {
     });
 }
 
+/** 克隆译文容器 */
 export function createTranslatedClone(markdownEl: any) {
     const translatedEl = markdownEl.cloneNode(true);
     translatedEl.classList.add('ghcn-discussion-translation-panel');
@@ -782,6 +793,7 @@ export function createTranslatedClone(markdownEl: any) {
     return translatedEl;
 }
 
+/** 切换视图模式 */
 export function setDiscussionViewMode(item: any, mode: any) {
     const state = getIssuePrDiscussionState(item);
     const nextMode = ['original', 'translated', 'bilingual'].includes(mode) ? mode : 'original';
@@ -805,6 +817,7 @@ export function setDiscussionViewMode(item: any, mode: any) {
     renderDiscussionToolbar(item);
 }
 
+/** 收集待翻译文本 */
 export function collectIssuePrTextTasks(bodyEl: any) {
     const tasks: any[] = [];
     const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
@@ -827,6 +840,7 @@ export function collectIssuePrTextTasks(bodyEl: any) {
     return tasks;
 }
 
+/** 警告配置问题 */
 export function warnIssuePrConfig(message: any) {
     const warnKey = `${FeatureSet.readme_provider}:${message}`;
     if (issuePrRuntime.lastWarnKey === warnKey) return;

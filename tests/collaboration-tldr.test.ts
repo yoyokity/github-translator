@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vite-plus/test';
-import { FeatureSet } from '../src/core/constants';
+import { FeatureSet } from '../src/core/state';
 import { state } from '../src/core/state';
 import {
     detectDefaultCollaborationMode,

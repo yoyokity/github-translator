@@ -1,9 +1,11 @@
 /**
  * @file src/providers/dispatcher.ts
- * 翻译调度引擎：并发控制、批处理分块、错误重试与降级机制
+ * 翻译调度：并发、分批与重试
  */
 
-import { AI_CHAT_PROVIDERS, README_CONFIG, readmeRuntime } from '../core/constants';
+import { README_CONFIG } from '../core/constants';
+import { AI_CHAT_PROVIDERS } from '../core/provider-protocol';
+import { readmeRuntime } from '../core/state';
 import {
     isExtensionContextInvalidatedError,
     normalizeRuntimeErrorMessage,
@@ -25,6 +27,7 @@ import { createRecoverableTranslationError } from './shared';
 
 export { createRecoverableTranslationError };
 
+/** 批量翻译入口 */
 export async function translateTextsWithProvider(
     texts: any,
     providerConfig: any,
@@ -32,11 +35,11 @@ export async function translateTextsWithProvider(
 ) {
     const translatedMap = new Map();
     const uncached: any[] = [];
-    let totalTokens = 0;
     const preferSingleItem = !!options.preferSingleItem;
     const debugContext = options.debugContext || null;
     const debugPhase = options.debugPhase || 'provider';
 
+    // 命中缓存则直接复用
     texts.forEach((text: any) => {
         const cacheKey = `${providerConfig.signature}|${text}`;
         const cached = normalizeTranslationText(readmeRuntime.translationCache.get(cacheKey));
@@ -51,6 +54,7 @@ export async function translateTextsWithProvider(
         }
     });
 
+    // 按提供商选择分批限制
     const usesAiBatchLimits =
         AI_CHAT_PROVIDERS.includes(providerConfig.provider) ||
         providerConfig.provider === 'qwen_mt';
@@ -73,6 +77,7 @@ export async function translateTextsWithProvider(
         concurrency: preferSingleItem ? 2 : README_CONFIG.TRANSLATION_CONCURRENCY,
         batchSizes: batches.map((batch: any) => batch.length),
     });
+
     const batchResults = await mapWithConcurrency(
         batches,
         preferSingleItem ? 2 : README_CONFIG.TRANSLATION_CONCURRENCY,
@@ -94,6 +99,7 @@ export async function translateTextsWithProvider(
                 let translatedItems = 0;
                 const missedItems: any[] = [];
 
+                // 校验每条结果，失败则单条重试
                 for (let index = 0; index < batch.length; index += 1) {
                     const text = batch[index];
                     let translated = normalizeTranslationText(batchTranslations[index]);
@@ -146,7 +152,8 @@ export async function translateTextsWithProvider(
             }
         },
     );
-    totalTokens = batchResults.reduce((sum: any, tokens: any) => sum + tokens, 0) as number;
+
+    const totalTokens = batchResults.reduce((sum: any, tokens: any) => sum + tokens, 0) as number;
 
     return {
         translatedMap,
@@ -154,6 +161,7 @@ export async function translateTextsWithProvider(
     };
 }
 
+/** 限并发执行 */
 export async function mapWithConcurrency(items: any, concurrency: any, worker: any) {
     const values = Array.isArray(items) ? items : [];
     if (!values.length) return [];
@@ -175,6 +183,7 @@ export async function mapWithConcurrency(items: any, concurrency: any, worker: a
     return results;
 }
 
+/** 分批翻译并降级重试 */
 export async function translateBatchWithFallback(batch: any, providerConfig: any): Promise<any> {
     try {
         const result = await translateBatch(batch, providerConfig);
@@ -195,19 +204,17 @@ export async function translateBatchWithFallback(batch: any, providerConfig: any
             AI_CHAT_PROVIDERS.includes(providerConfig.provider) ||
             providerConfig.provider === 'qwen_mt';
 
-        // 仅对 AI 接口的“内容/解析类”错误做降级；网络/鉴权/配置等错误继续上抛，
-        // 避免把整篇静默留成英文、且能向用户报错。
+        // 仅 AI 内容错误降级
         if (!isAiProvider || !error?.recoverable) {
             throw error;
         }
 
-        // 单条仍失败：降级为原文占位（交由上层单条重试与补翻译 pass 处理），
-        // 关键是让二分中已翻好的兄弟条目不再被一条坏内容连坐丢失。
+        // 单条失败降级为原文
         if (batch.length <= 1) {
             return { translations: batch.slice(), tokens: 0 };
         }
 
-        // OpenAI 兼容接口在部分平台上会因 JSON 输出不稳定导致整批失败，二分缩小坏条目的影响范围。
+        // 二分隔离坏条目
         const midpoint = Math.ceil(batch.length / 2);
         const left: any = await translateBatchWithFallback(
             batch.slice(0, midpoint),
@@ -221,6 +228,7 @@ export async function translateBatchWithFallback(batch: any, providerConfig: any
     }
 }
 
+/** 按条数/字符切批 */
 export function buildBatches(texts: any, maxItems: any, maxChars: any) {
     if (!texts.length) return [];
 
@@ -250,6 +258,7 @@ export function buildBatches(texts: any, maxItems: any, maxChars: any) {
     return batches;
 }
 
+/** 按提供商分发 */
 export async function translateBatch(texts: any, providerConfig: any) {
     switch (providerConfig.provider) {
         case 'deepl':

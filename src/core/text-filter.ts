@@ -1,8 +1,9 @@
 /**
  * @file src/core/text-filter.ts
- * 文本与 CJK 过滤器：技术术语识别、跳过规则、语言判定与空白规范化
+ * 文本与 CJK 过滤器
  */
 
+/** 判断 README 文本是否跳过 */
 export function shouldSkipReadmeText(text: any) {
     if (!text) return true;
     if (text.length > 2000) return true;
@@ -13,6 +14,7 @@ export function shouldSkipReadmeText(text: any) {
     return false;
 }
 
+/** 判断技术性文本 */
 export function isLikelyTechnicalReadmeText(text: any, node: any = null) {
     const input = String(text || '').trim();
     const element = node?.parentElement;
@@ -21,13 +23,12 @@ export function isLikelyTechnicalReadmeText(text: any, node: any = null) {
     }
     if (!input) return false;
 
-    // 参数说明列表/表格中的单词键名（如 slug、tags、title、content）应保持原文，
-    // 模型通常会原样返回，不能因此把 README 判为部分完成。
+    // 参数表中的键名保持原文
     if (/^[a-z][a-z0-9_-]{1,24}$/.test(input) && element?.closest('li, dt, table')) {
         return true;
     }
 
-    // 有些 README 会把命令放在普通 p/div/span 中，不能只依赖 pre/code 标签判断。
+    // 普通标签内的命令也跳过
     if (
         /^(?:[$>#]\s*)?(?:npm|pnpm|yarn|bun|node|python(?:3)?|pip(?:3)?|uv|go|cargo|docker(?:\s+compose)?|podman|kubectl|helm|git|gh|curl|wget|make|cmake|brew|apt(?:-get)?|apk|dnf|yum|ssh|chmod|chown|mkdir|cd|export|set)\b(?:\s|$)/i.test(
             input,
@@ -39,13 +40,14 @@ export function isLikelyTechnicalReadmeText(text: any, node: any = null) {
     if (input.length > 120) return false;
     if (isLikelyOpaqueReadmeLabel(input, node)) return true;
 
-    // 版本号、文件名和纯标识符通常不需要翻译；它们保持原文时不应把整篇 README 判为部分完成。
+    // 版本号与文件名不翻译
     if (/^[a-z]+\s+(?:version\s+)?v?\d+(?:\.\d+)+(?:[+._-][A-Za-z0-9]+)?[.!]?$/i.test(input)) {
         return true;
     }
     return false;
 }
 
+/** 判断不可译标签 */
 export function isLikelyOpaqueReadmeLabel(text: any, node: any = null) {
     const input = String(text || '').trim();
     if (!input || input.length > 120 || /[\u3400-\u9FFF]/.test(input)) return false;
@@ -61,7 +63,7 @@ export function isLikelyOpaqueReadmeLabel(text: any, node: any = null) {
     const titleCaseWords = words.filter((word: any) => /^[A-Z][A-Za-z0-9]*$/.test(word));
     if (isTableLink && titleCaseWords.length === words.length) return true;
 
-    // 普通句子不能因为首字母大写就被误判为产品名；这些词出现时仍需正常翻译。
+    // 常见功能词说明是句子
     const sentenceWords = new Set([
         'a',
         'an',
@@ -148,7 +150,7 @@ export function isLikelyOpaqueReadmeLabel(text: any, node: any = null) {
         return true;
     }
 
-    // 外部链接中的单一标识通常是包名/库名/平台名（如 boto、X），而不是自然语言句子。
+    // 链接中的单个标识多为包名
     return (
         isLink &&
         words.length === 1 &&
@@ -157,6 +159,7 @@ export function isLikelyOpaqueReadmeLabel(text: any, node: any = null) {
     );
 }
 
+/** 判断是否以中文为主 */
 export function isMostlyCjkText(text: any) {
     const input = String(text || '');
     const cjkCount = (input.match(/[\u3400-\u9FFF]/g) || []).length;
@@ -168,14 +171,15 @@ export function isMostlyCjkText(text: any) {
     const latinWords = (input.match(/[A-Za-z]{2,}/g) || []).length;
     const cjkPunctuation = (input.match(/[\u3000-\u303F\uFF01-\uFF5E]/g) || []).length;
 
-    // 若中文字符达到 8 个以上，且中文字数明显多于英文词数（技术名词混排常见场景），视为中文
+    // 汉字明显多于英文词
     if (cjkCount >= 8 && cjkCount >= latinWords * 1.5) return true;
-    // 中文标点加 6 个以上汉字也是明显的中文语句
+    // 中文标点加足量汉字
     if (cjkCount >= 6 && cjkPunctuation > 0 && cjkCount >= latinWords) return true;
 
     return cjkCount >= 8 && cjkCount >= latinCount * 0.8;
 }
 
+/** 按语言判断是否跳过 */
 export function shouldSkipReadmeByLanguage(text: any, targetLang: any) {
     if (!/^zh(?:-|$)/i.test(String(targetLang || ''))) return false;
 
@@ -191,8 +195,7 @@ export function shouldSkipReadmeByLanguage(text: any, targetLang: any) {
     return cjkCount >= latinCount * 1.5;
 }
 
+/** 规范化空白 */
 export function normalizeText(text: any) {
     return text.replace(/\xa0|[\s]+/g, ' ').trim();
 }
-
-/****************** Issue / PR 协作润色助手 ******************/

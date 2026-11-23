@@ -1,10 +1,9 @@
 /**
  * @file src/core/state.ts
  * 跨模块共享的可变运行期状态
- *
- * ES module 的导入绑定是只读的，原先共享 IIFE 作用域里被跨文件重新赋值的
- * pageConfig / 回调 / 定时器统一收敛到这个可变容器。
  */
+
+import { STORAGE_DEFAULTS } from './constants';
 
 export interface PageConfig {
     currentPageType?: string | boolean;
@@ -20,9 +19,47 @@ export interface PageConfig {
     tranSelectors: [string, string][];
 }
 
+/** 功能开关 */
+export const FeatureSet: Record<string, any> = { ...STORAGE_DEFAULTS };
+
+/** 各模块共享的可变状态 */
 export const state = {
     pageConfig: {} as PageConfig,
     scheduleReactGlobalNavRefresh: (): void => {},
     refreshPageObserver: (): void => {},
     historyRefreshTimer: null as number | null,
+};
+
+/** README 翻译运行状态 */
+export const readmeRuntime = {
+    timerId: 0,
+    inFlight: false,
+    rerunRequested: false,
+    stateByElement: new WeakMap(),
+    isApplyingTranslation: false,
+    domMutationGuardDepth: 0,
+    translationCache: new Map(),
+    repoCacheMap: new Map(),
+    repoCacheLoaded: false,
+    lastWarnKey: '',
+};
+
+/** Issue/PR 翻译运行状态 */
+export const issuePrRuntime = {
+    timerId: 0,
+    inFlight: false,
+    stateByElement: new WeakMap(),
+    lastWarnKey: '',
+};
+
+/** 协作助手运行状态 */
+export const collabRuntime = {
+    timerId: 0,
+    modalEl: null as any,
+};
+
+/** TLDR 运行状态 */
+export const tldrRuntime = {
+    timerId: 0,
+    isBusy: false,
 };

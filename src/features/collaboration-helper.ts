@@ -1,18 +1,19 @@
 /**
  * @file src/features/collaboration-helper.ts
- * Issue / PR 开源协作润色助手：4 种场景模式、模态窗口对比与撤销栈安全写回
+ * Issue / PR 开源协作润色助手
  */
 
-import { AI_CHAT_PROVIDERS, FeatureSet, collabRuntime } from '../core/constants';
+import { COLLAB_PROMPTS } from '../core/prompts';
+import { AI_CHAT_PROVIDERS, applyOpenAiCompatibleRequestOptions } from '../core/provider-protocol';
+import { proxyFetchJson } from '../core/proxy-fetch';
+import { FeatureSet, collabRuntime } from '../core/state';
 import {
     appendReadmeTranslationRecord,
     getReadmeUsageTokens,
     normalizeRuntimeErrorMessage,
 } from '../core/storage-cache';
 import {
-    applyOpenAiCompatibleRequestOptions,
     extractChatMessageContent,
-    proxyFetchJson,
     stripOpenAiReasoningBlocks,
 } from '../providers/cloud-translators';
 import { getProviderConfig } from '../providers/provider-config';
@@ -20,15 +21,12 @@ import { getProviderConfig } from '../providers/provider-config';
 export const COLLAB_CONFIG = {
     DEBOUNCE_MS: 160,
     TEXTAREA_SELECTORS: [
-        // Primer & React markdown editors
         'textarea[data-testid="markdown-editor-text-area"]',
         'textarea[data-testid*="editor"]',
         'textarea[data-testid*="comment"]',
         '[data-component="MarkdownEditor"] textarea',
         '[data-testid="markdown-editor"] textarea',
         '[data-testid="comment-composer"] textarea',
-
-        // New Issue & Issue Forms / Templates
         'form.new_issue textarea',
         'form#new_issue textarea',
         'form[action*="/issues"] textarea',
@@ -36,8 +34,6 @@ export const COLLAB_CONFIG = {
         'textarea[name^="issue_form["]',
         'textarea[id^="issue_"]',
         'textarea#issue_body',
-
-        // New Pull Request & Compare
         'form.new_pull_request textarea',
         'form#new_pull_request textarea',
         'form.js-new-pr-form textarea',
@@ -48,8 +44,6 @@ export const COLLAB_CONFIG = {
         'textarea[name^="pull_request["]',
         'textarea[id^="pull_request_"]',
         'textarea#pull_request_body',
-
-        // Comments & Discussions
         'textarea#new_comment_field',
         'textarea#discussion_body',
         'textarea[name^="comment["]',
@@ -75,47 +69,7 @@ export const COLLAB_MODES = [
     { id: 'general', label: '通用润色', desc: '通用地道英文技术 Markdown 润色' },
 ];
 
-export const COLLAB_PROMPTS: Record<string, string> = {
-    bug: `You are an expert open-source maintainer and technical writer. Transform the user's Chinese draft into a professional, structured, idiomatic English GitHub Bug Report in Markdown.
-Structure it with clean Markdown sections such as:
-### Description
-### Steps to Reproduce
-### Expected Behavior
-### Actual Behavior
-### Environment (if applicable)
-
-Strict rules:
-1. Retain all code snippets, terminal commands, log traces, error messages, URLs, version numbers, and variable names verbatim.
-2. Translate all Chinese descriptions into concise, professional, idiomatic technical English commonly used in leading GitHub projects.
-3. Output ONLY the raw Markdown content. Do NOT include any conversational preamble, greetings, or postscript comments.`,
-
-    feature: `You are an expert open-source maintainer and technical writer. Transform the user's Chinese draft into a professional, structured, idiomatic English GitHub Feature Request in Markdown.
-Structure it with clean Markdown sections such as:
-### Problem Statement / Motivation
-### Proposed Solution
-### Alternatives Considered (if applicable)
-### Additional Context
-
-Strict rules:
-1. Retain all code snippets, terminal commands, URLs, and variable names verbatim.
-2. Translate all Chinese descriptions into clear, persuasive, idiomatic technical English.
-3. Output ONLY the raw Markdown content. Do NOT include any conversational preamble, greetings, or postscript comments.`,
-
-    reply: `You are an expert open-source maintainer and technical writer. Transform the user's Chinese draft into a polite, clear, concise, and professional English reply for a GitHub Issue or Pull Request discussion.
-
-Strict rules:
-1. Preserve all code blocks, technical terms, commit hashes, PR/Issue references (#123), and usernames (@name).
-2. Use respectful, constructive open-source collaboration tone.
-3. Output ONLY the raw Markdown content. Do NOT include any conversational preamble or greetings before the content.`,
-
-    general: `You are an expert technical writer for GitHub open-source repositories. Polish the user's draft into clean, professional, concise, and idiomatic technical English Markdown.
-
-Strict rules:
-1. Retain all code blocks, commands, URLs, variables, and technical formatting verbatim.
-2. Improve clarity, grammar, tone, and technical phrasing.
-3. Output ONLY the raw Markdown content. Do NOT include any conversational preamble or pleasantries.`,
-};
-
+/** 是否启用协作助手 */
 export function isCollaborationHelperEnabled() {
     return (
         FeatureSet.enable_extension &&
@@ -125,11 +79,13 @@ export function isCollaborationHelperEnabled() {
 }
 
 export let collabListenersAttached = false;
+
+/** 绑定全局监听 */
 export function ensureCollaborationGlobalListeners() {
     if (collabListenersAttached) return;
     collabListenersAttached = true;
 
-    // 1. 用户聚焦到任意输入框时，若尚未挂载润色助手则立即触发扫描挂载
+    // 聚焦输入框时扫描
     document.addEventListener(
         'focusin',
         (event: any) => {
@@ -143,7 +99,7 @@ export function ensureCollaborationGlobalListeners() {
         { passive: true },
     );
 
-    // 2. 用户点击页面按钮或选项卡（如 "Create pull request"、"Write" 选项卡、展开抽屉、模板选择等）
+    // 点击交互元素时扫描
     document.addEventListener(
         'click',
         (event: any) => {
@@ -160,6 +116,7 @@ export function ensureCollaborationGlobalListeners() {
     );
 }
 
+/** 调度控件挂载 */
 export function scheduleCollaborationHelperControls(reason: any, immediate: any = false) {
     if (!FeatureSet.enable_extension) return;
 
@@ -175,6 +132,7 @@ export function scheduleCollaborationHelperControls(reason: any, immediate: any 
     }, delay);
 }
 
+/** 挂载润色按钮 */
 export function setupCollaborationHelperControls(_reason?: any) {
     if (!isCollaborationHelperEnabled()) {
         restoreCollaborationHelperControls();
@@ -189,35 +147,38 @@ export function setupCollaborationHelperControls(_reason?: any) {
     });
 }
 
+/** 移除润色控件 */
 export function restoreCollaborationHelperControls() {
     document.querySelectorAll('[data-ghcn-collab-btn]').forEach((btn: any) => btn.remove());
     closeCollaborationModal();
 }
 
+/** 校验目标输入框 */
 export function isValidCollaborationTextarea(el: any) {
     if (!el || !el.isConnected) return false;
     if (el.tagName !== 'TEXTAREA') return false;
     if (el.closest('.ghcn-collab-modal')) return false;
     if (el.type === 'hidden' || el.hasAttribute('hidden')) return false;
 
-    // 过滤搜索框与密钥/Token等敏感输入字段
+    // 排除敏感字段
     const nameOrId = `${el.name || ''} ${el.id || ''} ${el.className || ''}`.toLowerCase();
     if (/token|secret|password|credential|private_key/i.test(nameOrId)) return false;
 
     return true;
 }
 
+/** 查找可润色输入框 */
 export function findCollaborationTextareas() {
     const found = new Set();
 
-    // 1. 常规选择器批量发现
+    // 常规选择器
     document.querySelectorAll(COLLAB_CONFIG.TEXTAREA_SELECTORS).forEach((el: any) => {
         if (isValidCollaborationTextarea(el)) {
             found.add(el);
         }
     });
 
-    // 2. 由 markdown-toolbar 的 for 属性反查绑定的 textarea (精确 1:1 关系)
+    // toolbar for 反向查找
     document.querySelectorAll('markdown-toolbar[for], [data-for]').forEach((toolbar: any) => {
         const targetId = toolbar.getAttribute('for') || toolbar.getAttribute('data-for');
         if (targetId) {
@@ -228,7 +189,7 @@ export function findCollaborationTextareas() {
         }
     });
 
-    // 3. 由 markdown-toolbar 所在容器向下反查 textarea
+    // toolbar 容器内查找
     document.querySelectorAll('markdown-toolbar:not([for])').forEach((toolbar: any) => {
         const container =
             toolbar.closest(
@@ -245,6 +206,7 @@ export function findCollaborationTextareas() {
     return [...found];
 }
 
+/** 查找工具栏插入点 */
 export function findCollaborationToolbarMountPoint(textarea: any) {
     if (!textarea) return null;
 
@@ -264,7 +226,7 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
 
     let toolbar = null;
 
-    // 1. 优先通过 textarea.id 与 markdown-toolbar[for] 进行精确 1:1 匹配
+    // 按 id 精确匹配
     if (textarea.id) {
         try {
             toolbar =
@@ -275,7 +237,7 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
         }
     }
 
-    // 2. 次优先：在当前 textarea 独立的作用域容器内寻找工具栏（防止 Issue 模板等多字段表单串位）
+    // 组件局部作用域
     if (!toolbar) {
         const localScope =
             textarea.closest(
@@ -293,7 +255,7 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
         }
     }
 
-    // 3. 兜底在所属表单范围查找
+    // 表单范围兜底
     if (!toolbar) {
         const formScope = textarea.closest('form') || textarea.parentElement;
         if (formScope) {
@@ -308,7 +270,7 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
     }
 
     if (toolbar) {
-        // 定位开头的标题按钮 (H)，确保紧贴在工具栏最左侧第一项（放在工具栏左起）
+        // 插到标题按钮前
         const headingBtn = toolbar.querySelector(
             'button[data-md-button="heading"], button[aria-label*="heading" i], button[aria-label*="Heading"], button[aria-label*="标题"], button:has(svg.octicon-heading), button[data-testid*="heading"]',
         );
@@ -326,7 +288,7 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
             }
         }
 
-        // 无标题按钮时（如 Issue Form 模板中通常无 md-header），定位首个格式化工具（如 md-bold），保证排在工具栏左起
+        // 插到首个工具前
         const firstTool = toolbar.querySelector(
             'md-bold, md-italic, [data-md-button], .toolbar-item, button:not([data-ghcn-collab-btn]), [role="button"]:not([data-ghcn-collab-btn])',
         );
@@ -342,7 +304,7 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
             }
         }
 
-        // 兜底直接插入在 toolbar 第一项前
+        // 插到 toolbar 首项前
         const firstChild = toolbar.querySelector(':scope > :not([data-ghcn-collab-btn])');
         return {
             container: toolbar,
@@ -350,7 +312,7 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
         };
     }
 
-    // 4. Tab 栏之后的右侧工具区域兜底
+    // Tab 右侧兜底
     const editorContainer =
         textarea.closest(
             '[data-testid="markdown-editor"], [data-testid="comment-composer"], .js-previewable-comment-form, form, .timeline-comment',
@@ -374,10 +336,11 @@ export function findCollaborationToolbarMountPoint(textarea: any) {
     return null;
 }
 
+/** 挂载按钮到工具栏 */
 export function mountCollaborationToolbar(textarea: any) {
     const mountPoint = findCollaborationToolbarMountPoint(textarea);
     if (mountPoint && mountPoint.container) {
-        // 清理可能已插入的旧 fallback bar
+        // 清理旧 fallback
         const fallbackBar = textarea.parentElement?.querySelector('.ghcn-collab-fallback-bar');
         if (fallbackBar) {
             fallbackBar.remove();
@@ -404,7 +367,7 @@ export function mountCollaborationToolbar(textarea: any) {
         return;
     }
 
-    // 仅在完全没有工具栏的最简纯文本框下使用外部 fallback
+    // 无工具栏时用外层容器
     if (textarea.parentElement && !textarea.parentElement.querySelector('[data-ghcn-collab-btn]')) {
         const wrapper = document.createElement('div');
         wrapper.className = 'ghcn-collab-fallback-bar';
@@ -414,6 +377,7 @@ export function mountCollaborationToolbar(textarea: any) {
     }
 }
 
+/** 创建润色按钮 */
 export function createCollaborationButton(textarea: any) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -430,6 +394,7 @@ export function createCollaborationButton(textarea: any) {
     return btn;
 }
 
+/** 推断默认润色模式 */
 export function detectDefaultCollaborationMode(textarea: any) {
     const pathname = String(window.location.pathname || '').toLowerCase();
     const search = String(window.location.search || '').toLowerCase();
@@ -464,6 +429,7 @@ export function detectDefaultCollaborationMode(textarea: any) {
     return 'general';
 }
 
+/** 关闭润色弹窗 */
 export function closeCollaborationModal() {
     if (collabRuntime.modalEl) {
         collabRuntime.modalEl.remove();
@@ -471,6 +437,7 @@ export function closeCollaborationModal() {
     }
 }
 
+/** 打开润色弹窗 */
 export function openCollaborationModal(textarea: any) {
     closeCollaborationModal();
 
@@ -485,7 +452,7 @@ export function openCollaborationModal(textarea: any) {
     const modal = document.createElement('div');
     modal.className = 'ghcn-collab-modal';
 
-    // Header
+    // 头部
     const header = document.createElement('div');
     header.className = 'ghcn-collab-header';
     header.innerHTML = `
@@ -496,7 +463,7 @@ export function openCollaborationModal(textarea: any) {
             <button type="button" class="ghcn-collab-close" title="关闭 (Esc)">×</button>
         `;
 
-    // Mode switch tabs
+    // 模式切换
     const modeBar = document.createElement('div');
     modeBar.className = 'ghcn-collab-modes';
     COLLAB_MODES.forEach((mode: any) => {
@@ -519,11 +486,11 @@ export function openCollaborationModal(textarea: any) {
         modeBar.appendChild(modeBtn);
     });
 
-    // Dual columns
+    // 双栏主体
     const body = document.createElement('div');
     body.className = 'ghcn-collab-body';
 
-    // Left column: Chinese Draft
+    // 左栏：中文草稿
     const leftCol = document.createElement('div');
     leftCol.className = 'ghcn-collab-col';
     const leftHeader = document.createElement('div');
@@ -540,7 +507,7 @@ export function openCollaborationModal(textarea: any) {
     leftCol.appendChild(leftHeader);
     leftCol.appendChild(leftContent);
 
-    // Right column: Polished English Markdown
+    // 右栏：英文结果
     const rightCol = document.createElement('div');
     rightCol.className = 'ghcn-collab-col';
     const rightHeader = document.createElement('div');
@@ -558,7 +525,7 @@ export function openCollaborationModal(textarea: any) {
     body.appendChild(leftCol);
     body.appendChild(rightCol);
 
-    // Footer
+    // 底部操作
     const footer = document.createElement('div');
     footer.className = 'ghcn-collab-footer';
 
@@ -605,7 +572,7 @@ export function openCollaborationModal(textarea: any) {
     modal.appendChild(footer);
     overlay.appendChild(modal);
 
-    // Polish runner
+    // 执行润色
     const triggerPolish = async () => {
         const draft = draftArea.value.trim();
         if (!draft) {
@@ -643,7 +610,6 @@ export function openCollaborationModal(textarea: any) {
         }
     };
 
-    // Event bindings
     polishBtn.addEventListener('click', triggerPolish);
 
     previewArea.addEventListener('input', () => {
@@ -708,6 +674,7 @@ export function openCollaborationModal(textarea: any) {
     }
 }
 
+/** 调用模型润色 */
 export async function polishCollaborationDraft(draftText: any, mode: any = 'general') {
     const startAt = performance.now();
     const providerConfig = getProviderConfig();
@@ -749,6 +716,7 @@ export async function polishCollaborationDraft(draftText: any, mode: any = 'gene
 
         const firstChoice = data?.choices?.[0] || {};
         polishedText = stripOpenAiReasoningBlocks(extractChatMessageContent(firstChoice));
+        // 去除代码块包裹
         const codeBlockMatch = polishedText.match(/^```(?:markdown)?\r?\n([\s\S]*?)\r?\n```$/i);
         if (codeBlockMatch) {
             polishedText = codeBlockMatch[1].trim();
@@ -779,6 +747,7 @@ export async function polishCollaborationDraft(draftText: any, mode: any = 'gene
     };
 }
 
+/** 回填润色结果 */
 export function applyPolishedTextToTextarea(textarea: any, text: any) {
     if (!textarea) return;
     textarea.focus();
@@ -793,7 +762,6 @@ export function applyPolishedTextToTextarea(textarea: any, text: any) {
 
     if (!execSucceeded || textarea.value !== text) {
         // oxlint-disable-next-line typescript(unbound-method)
-
         const nativeSetter = Object.getOwnPropertyDescriptor(
             window.HTMLTextAreaElement.prototype,
             'value',
@@ -808,6 +776,7 @@ export function applyPolishedTextToTextarea(textarea: any, text: any) {
     }
 }
 
+/** 注入润色样式 */
 export function injectCollaborationControlStyles() {
     if (document.getElementById('ghcn-collab-style')) return;
 
@@ -1132,5 +1101,3 @@ export function injectCollaborationControlStyles() {
         `;
     document.head.appendChild(style);
 }
-
-/****************** 仓库首页 AI 项目速读胶囊 (TL;DR Capsule) ******************/

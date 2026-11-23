@@ -13,7 +13,7 @@ import {
     getStatusMeta,
     normalizeOpenAiEndpoint,
     normalizeUrl,
-} from '../src/ui/options/options';
+} from '../src/ui/options/options-core';
 
 describe('Options 核心逻辑', () => {
     it('记录详情、来源与状态映射为可读中文', () => {

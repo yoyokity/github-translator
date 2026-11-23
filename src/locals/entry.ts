@@ -1,6 +1,6 @@
 /**
  * @file src/locals/entry.ts
- * 词库经典脚本入口：挂载全局 I18N，供 locals.js 先于 content.js 加载
+ * 词库入口：挂载全局 I18N
  */
 
 import { I18N } from './index';

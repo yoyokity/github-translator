@@ -11,14 +11,17 @@ export type JsonObject = Record<string, any>;
 const ROOT = path.resolve(import.meta.dirname, '..');
 const TARGETS = ['chrome', 'edge', 'firefox'] as const;
 
+/** 读取 JSON 文件 */
 function readJson(relativePath: string): JsonObject {
     return JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), 'utf8')) as JsonObject;
 }
 
+/** 是否普通对象 */
 function isPlainObject(value: unknown): value is JsonObject {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** 深合并对象 */
 export function deepMerge(base: JsonObject, override: JsonObject): JsonObject {
     const result: JsonObject = { ...base };
     for (const [key, value] of Object.entries(override)) {
@@ -30,6 +33,7 @@ export function deepMerge(base: JsonObject, override: JsonObject): JsonObject {
     return result;
 }
 
+/** 构建指定端 manifest */
 export function buildManifest(target: string, version: string): JsonObject {
     if (!(TARGETS as readonly string[]).includes(target)) {
         throw new Error(`Unknown browser target: ${target}`);

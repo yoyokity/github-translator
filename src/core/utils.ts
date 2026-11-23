@@ -1,12 +1,14 @@
 /**
  * @file src/core/utils.ts
- * 通用工具函数：URL 规整、HTML 实体转义、哈希计算与字符串截断
+ * 通用工具函数
  */
 
+/** 压缩 URL 空白 */
 export function normalizeUrl(url: any) {
     return (url || '').trim().replace(/\s+/g, '');
 }
 
+/** 解码 HTML 实体 */
 export function decodeHtmlEntities(text: any) {
     const safeText = String(text || '').replace(/<\/textarea/gi, '&lt;/textarea');
     const parsed = new DOMParser().parseFromString(
@@ -16,6 +18,7 @@ export function decodeHtmlEntities(text: any) {
     return parsed.querySelector('textarea')?.value || '';
 }
 
+/** 转义 HTML 特殊字符 */
 export function escapeHtml(value: any) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -25,11 +28,13 @@ export function escapeHtml(value: any) {
         .replace(/'/g, '&#39;');
 }
 
+/** 按长度截断文本 */
 export function truncateText(text: any, maxLength: any) {
     if (!text || text.length <= maxLength) return text || '';
     return `${text.slice(0, maxLength)}...`;
 }
 
+/** 计算 32 位哈希 */
 export function createHash(input: any) {
     let hash = 0;
     for (let i = 0; i < input.length; i += 1) {
@@ -38,14 +43,17 @@ export function createHash(input: any) {
     return (hash >>> 0).toString(16);
 }
 
+/** 是否为 [object Object] */
 export function isObjectObjectArtifact(value: any) {
     return /\[object Object\]/i.test(String(value || ''));
 }
 
+/** 是否含 [object Object] */
 export function containsObjectObjectArtifact(value: any) {
     return isObjectObjectArtifact(value);
 }
 
+/** 归一化翻译结果 */
 export function normalizeTranslationText(value: any, depth: any = 0): any {
     if (value == null) return '';
     if (typeof value === 'string') return value.trim();
@@ -61,6 +69,7 @@ export function normalizeTranslationText(value: any, depth: any = 0): any {
     }
 
     if (typeof value === 'object') {
+        // 常见译文包装字段
         const preferredKeys = [
             'text',
             'translatedText',
@@ -71,7 +80,6 @@ export function normalizeTranslationText(value: any, depth: any = 0): any {
             'result',
             'output_text',
             'outputText',
-            // 部分模型会镜像请求结构，把译文包进 texts/translations 数组里返回
             'texts',
             'translations',
         ];

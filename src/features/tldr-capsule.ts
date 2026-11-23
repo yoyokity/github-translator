@@ -1,9 +1,12 @@
 /**
  * @file src/features/tldr-capsule.ts
- * 仓库首页 AI 速读胶囊 (TL;DR)：3 秒极简启动提取、三要素展示与本地秒开缓存
+ * 仓库首页 AI 速读胶囊
  */
 
-import { AI_CHAT_PROVIDERS, FeatureSet, readmeRuntime, tldrRuntime } from '../core/constants';
+import { TLDR_SYSTEM_PROMPT } from '../core/prompts';
+import { AI_CHAT_PROVIDERS, applyOpenAiCompatibleRequestOptions } from '../core/provider-protocol';
+import { proxyFetchJson } from '../core/proxy-fetch';
+import { FeatureSet, readmeRuntime, tldrRuntime } from '../core/state';
 import {
     appendReadmeTranslationRecord,
     ensureRepoCacheLoaded,
@@ -16,28 +19,36 @@ import {
 } from '../core/storage-cache';
 import { normalizeText } from '../core/text-filter';
 import { decodeHtmlEntities, escapeHtml } from '../core/utils';
-import { getReadmeElementState, getReadmeRootElement, isReadmePage } from './markdown-translation';
 import {
-    applyOpenAiCompatibleRequestOptions,
     extractChatMessageContent,
-    proxyFetchJson,
     stripOpenAiReasoningBlocks,
 } from '../providers/cloud-translators';
 import { getProviderConfig } from '../providers/provider-config';
+import { getReadmeElementState, getReadmeRootElement, isReadmePage } from './markdown-translation';
 
-// TL;DR 卡片大量直接操作 DOM 属性；把 DOM 边界放宽到 any，避免为每个查询结果重复标注元素类型。
+// 放宽 DOM 类型便于操作
 const document: any = globalThis.document;
 
-export const TLDR_SYSTEM_PROMPT = `你是一个资深开源架构师与技术评测专家。请根据输入的开源项目 README 前部内容，用简体中文生成一份极简的「项目速读胶囊」。
-严格遵循以下 2 点结构输出纯 Markdown：
-- **🎯 核心定位**：一句话直击痛点，说明这个项目解决什么核心问题，属于什么领域。
-- **💡 选型考量**：说明同类对比或适用场景（如：“相比 XX 更轻量，适合小型集群”）。
-输出纯 Markdown 列表，严格不要包含额外前缀、礼貌客套或总结废话。`;
+export const TLDR_ICONS = {
+    sparkle:
+        '<svg class="octicon octicon-sparkle" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7.53 1.282a.5.5 0 0 1 .94 0l.478 1.306a7.492 7.492 0 0 0 4.464 4.464l1.306.478a.5.5 0 0 1 0 .94l-1.306.478a7.492 7.492 0 0 0-4.464 4.464l-.478 1.306a.5.5 0 0 1-.94 0l-.478-1.306a7.492 7.492 0 0 0-4.464-4.464L1.282 8.47a.5.5 0 0 1 0-.94l1.306-.478a7.492 7.492 0 0 0 4.464-4.464Z"></path></svg>',
+    sync: '<svg class="octicon octicon-sync" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z"></path></svg>',
+    close: '<svg class="octicon octicon-x" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg>',
+    chevronUp:
+        '<svg class="octicon octicon-chevron-up" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M3.22 10.53a.749.749 0 0 1 0-1.06l4.25-4.25a.749.749 0 0 1 1.06 0l4.25 4.25a.749.749 0 1 1-1.06 1.06L8 6.811 4.28 10.53a.749.749 0 0 1-1.06 0Z"></path></svg>',
+    chevronDown:
+        '<svg class="octicon octicon-chevron-down" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12.78 5.47a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0l-4.25-4.25a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"></path></svg>',
+    copy: '<svg class="octicon octicon-copy" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path></svg>',
+    check: '<svg class="octicon octicon-check" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>',
+    alert: '<svg class="octicon octicon-alert" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>',
+};
 
+/** 是否启用速读胶囊 */
 export function isTldrCapsuleEnabled() {
     return FeatureSet.enable_extension && FeatureSet.enable_repo_tldr && isReadmePage();
 }
 
+/** 调度速读控件 */
 export function scheduleTldrCapsuleControls(reason: any) {
     if (!FeatureSet.enable_extension) return;
 
@@ -51,6 +62,7 @@ export function scheduleTldrCapsuleControls(reason: any) {
     }, 160);
 }
 
+/** 挂载速读控件 */
 export function setupTldrCapsuleControls(_reason?: any) {
     if (!isTldrCapsuleEnabled()) {
         restoreTldrCapsuleControls();
@@ -63,7 +75,7 @@ export function setupTldrCapsuleControls(_reason?: any) {
     const repoInfo = getCurrentRepoInfo();
     if (!repoInfo) return;
 
-    // 若 README 过于简短（不足 80 字符）或仅有一行标题，防范向 AI 发送无效请求造成 Token 浪费与幻觉
+    // 内容过短则跳过
     const introText = extractReadmeIntroText(readmeRoot);
     if (!introText || introText.trim().length < 80) {
         restoreTldrCapsuleControls();
@@ -74,30 +86,34 @@ export function setupTldrCapsuleControls(_reason?: any) {
     void mountTldrCapsule(readmeRoot, repoInfo);
 }
 
+/** 移除速读控件 */
 export function restoreTldrCapsuleControls() {
     document.querySelectorAll('[data-ghcn-tldr]').forEach((el: any) => el.remove());
 }
 
+/** 生成速读缓存键 */
 export function buildTldrCacheKey(repoInfo: any, sourceHash: any) {
     if (!repoInfo?.fullName || !sourceHash) return '';
     return `${repoInfo.fullName.toLowerCase()}|tldr|${sourceHash}`;
 }
 
+/** 计算 README 哈希 */
 export function getTldrSourceHash(readmeRoot: any) {
     if (!readmeRoot) return '';
-    const state =
+    const readmeState =
         typeof getReadmeElementState === 'function' ? getReadmeElementState(readmeRoot) : null;
-    const html = state?.originalHtml || readmeRoot.innerHTML || '';
+    const html = readmeState?.originalHtml || readmeRoot.innerHTML || '';
     return getStableReadmeTextHash(html);
 }
 
+/** 提取 README 简介 */
 export function extractReadmeIntroText(readmeRoot: any, maxChars: any = 2400) {
-    const state =
+    const readmeState =
         typeof getReadmeElementState === 'function' ? getReadmeElementState(readmeRoot) : null;
     let sourceEl = readmeRoot;
-    if (state?.originalHtml) {
+    if (readmeState?.originalHtml) {
         sourceEl = document.createElement('div');
-        sourceEl.innerHTML = state.originalHtml;
+        sourceEl.innerHTML = readmeState.originalHtml;
     }
     const clone = sourceEl.cloneNode(true);
     clone
@@ -107,16 +123,17 @@ export function extractReadmeIntroText(readmeRoot: any, maxChars: any = 2400) {
     return text.slice(0, maxChars);
 }
 
+/** 查找速读卡片挂载点 */
 export function findTldrMountPoint(readmeRoot: any) {
     if (!readmeRoot) return null;
 
-    // 如果处于 .Box-body 内部，优先挂载在 .Box-body 之前（紧贴 .Box-header 之后，贴紧上边和左右）
+    // 优先 .Box-body 之前
     const boxBody = readmeRoot.closest('.Box-body');
     if (boxBody && boxBody.parentElement) {
         return { parent: boxBody.parentElement, before: boxBody };
     }
 
-    // 默认挂载在 README 容器内部顶部（正文 readmeRoot 之前、自述文件标题栏之后）
+    // README 容器顶部
     if (readmeRoot.parentElement) {
         return { parent: readmeRoot.parentElement, before: readmeRoot };
     }
@@ -124,6 +141,7 @@ export function findTldrMountPoint(readmeRoot: any) {
     return null;
 }
 
+/** 查找头部操作区 */
 export function findReadmeHeaderActions(readmeRoot: any) {
     if (!readmeRoot) return null;
 
@@ -132,7 +150,7 @@ export function findReadmeHeaderActions(readmeRoot: any) {
         document.querySelector('#readme, [data-testid="readme"]');
     if (!readmeBox) return null;
 
-    // 1. 优先定位 README 头部区域内的 Copilot 图标按钮（放在这个图标左侧）
+    // Copilot 按钮旁
     const copilotSvg = readmeBox.querySelector('svg.octicon-copilot');
     if (copilotSvg) {
         const copilotBtn = copilotSvg.closest('button, [role="button"]');
@@ -145,7 +163,7 @@ export function findReadmeHeaderActions(readmeRoot: any) {
         }
     }
 
-    // 2. 次优先：定位铅笔编辑按钮或目录大纲按钮（无 Copilot 权限或未开启时的通用动作栏）
+    // 编辑/大纲按钮旁
     const siblingSvg = readmeBox.querySelector(
         'svg.octicon-pencil, svg.octicon-list-unordered, svg.octicon-kebab-horizontal',
     );
@@ -160,7 +178,7 @@ export function findReadmeHeaderActions(readmeRoot: any) {
         }
     }
 
-    // 3. 兜底：定位 Box-header 内的右侧操作按钮区
+    // 头部右侧兜底
     const header = readmeBox.querySelector('.Box-header, header');
     if (header) {
         const actionsContainer = header.querySelector(
@@ -178,6 +196,7 @@ export function findReadmeHeaderActions(readmeRoot: any) {
     return null;
 }
 
+/** 创建速读卡片 */
 export function createTldrCardElement(readmeRoot: any, sourceHash: any) {
     const mountPoint = findTldrMountPoint(readmeRoot);
     if (!mountPoint) return null;
@@ -204,6 +223,7 @@ export function createTldrCardElement(readmeRoot: any, sourceHash: any) {
     return card;
 }
 
+/** 挂载头部速读按钮 */
 export function mountTldrHeaderButton(readmeRoot: any, repoInfo: any, onToggle: any) {
     const headerActions = findReadmeHeaderActions(readmeRoot);
     if (!headerActions || !headerActions.container) return null;
@@ -246,14 +266,15 @@ export function mountTldrHeaderButton(readmeRoot: any, repoInfo: any, onToggle: 
     return btn;
 }
 
+/** 挂载速读胶囊 */
 export async function mountTldrCapsule(readmeRoot: any, repoInfo: any) {
     const sourceHash = getTldrSourceHash(readmeRoot);
     const cacheKey = buildTldrCacheKey(repoInfo, sourceHash);
 
-    // 1. 精确匹配当前 hash 缓存
+    // 精确 hash 缓存
     let cached = await getRepoCachedTranslation(cacheKey, { requireComplete: true });
 
-    // 2. 兜底匹配该仓库最新生成的速读缓存（防止 README 翻译后 DOM 变动导致 hash 微小变化）
+    // 兜底同仓库缓存
     if (!cached?.tldrContent && FeatureSet.readme_enable_repo_cache && repoInfo?.fullName) {
         await ensureRepoCacheLoaded();
         const prefix = `${repoInfo.fullName.toLowerCase()}|tldr|`;
@@ -267,11 +288,10 @@ export async function mountTldrCapsule(readmeRoot: any, repoInfo: any) {
 
     const headerActions = findReadmeHeaderActions(readmeRoot);
 
-    // 挂载或更新头部按钮（位于 Copilot 图标左侧）
+    // 头部按钮点击展开/收起
     const headerBtn = mountTldrHeaderButton(readmeRoot, repoInfo, async (btn: any) => {
         let card = document.querySelector('[data-ghcn-tldr="capsule"]');
 
-        // 如果卡片已经存在且可见，点击则折叠/收起卡片
         if (card && card.style.display !== 'none') {
             card.style.display = 'none';
             btn.classList.remove('is-active');
@@ -279,7 +299,6 @@ export async function mountTldrCapsule(readmeRoot: any, repoInfo: any) {
             return;
         }
 
-        // 如果卡片已经存在但处于隐藏状态，切换为展示
         if (card) {
             card.style.display = '';
             btn.classList.add('is-active');
@@ -287,14 +306,13 @@ export async function mountTldrCapsule(readmeRoot: any, repoInfo: any) {
             return;
         }
 
-        // 卡片尚未创建：点击时按需创建卡片并展示内容
         card = createTldrCardElement(readmeRoot, sourceHash);
         if (!card) return;
 
         btn.classList.add('is-active', 'is-loading');
         btn.setAttribute('aria-expanded', 'true');
 
-        // 如果已有缓存内容直接秒开渲染，否则调用 AI 提炼
+        // 有缓存则秒开
         if (cached?.tldrContent) {
             renderTldrContent(card, cached.tldrContent, repoInfo, readmeRoot, sourceHash, true);
             btn.classList.remove('is-loading');
@@ -307,7 +325,7 @@ export async function mountTldrCapsule(readmeRoot: any, repoInfo: any) {
         }
     });
 
-    // 默认不主动展示下方的总结内容卡片，保持 README 清爽，待用户点击头部「AI 速读」按钮后再展开
+    // 默认收起卡片
     const existingCard = document.querySelector('[data-ghcn-tldr="capsule"]');
     if (existingCard && !headerBtn?.classList.contains('is-active')) {
         existingCard.style.display = 'none';
@@ -321,7 +339,7 @@ export async function mountTldrCapsule(readmeRoot: any, repoInfo: any) {
             headerBtn.title = 'AI 项目速读 (TL;DR) - 点击展开速读卡片';
         }
     } else if (!headerActions) {
-        // 极低概率：若找不到任何头部按钮挂载点，降级在 README 顶部展示初始提炼条
+        // 无头部时降级展示
         const card = createTldrCardElement(readmeRoot, sourceHash);
         if (card) {
             if (cached?.tldrContent) {
@@ -333,20 +351,7 @@ export async function mountTldrCapsule(readmeRoot: any, repoInfo: any) {
     }
 }
 
-export const TLDR_ICONS = {
-    sparkle:
-        '<svg class="octicon octicon-sparkle" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7.53 1.282a.5.5 0 0 1 .94 0l.478 1.306a7.492 7.492 0 0 0 4.464 4.464l1.306.478a.5.5 0 0 1 0 .94l-1.306.478a7.492 7.492 0 0 0-4.464 4.464l-.478 1.306a.5.5 0 0 1-.94 0l-.478-1.306a7.492 7.492 0 0 0-4.464-4.464L1.282 8.47a.5.5 0 0 1 0-.94l1.306-.478a7.492 7.492 0 0 0 4.464-4.464Z"></path></svg>',
-    sync: '<svg class="octicon octicon-sync" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z"></path></svg>',
-    close: '<svg class="octicon octicon-x" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg>',
-    chevronUp:
-        '<svg class="octicon octicon-chevron-up" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M3.22 10.53a.749.749 0 0 1 0-1.06l4.25-4.25a.749.749 0 0 1 1.06 0l4.25 4.25a.749.749 0 1 1-1.06 1.06L8 6.811 4.28 10.53a.749.749 0 0 1-1.06 0Z"></path></svg>',
-    chevronDown:
-        '<svg class="octicon octicon-chevron-down" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M12.78 5.47a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0l-4.25-4.25a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"></path></svg>',
-    copy: '<svg class="octicon octicon-copy" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path></svg>',
-    check: '<svg class="octicon octicon-check" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>',
-    alert: '<svg class="octicon octicon-alert" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>',
-};
-
+/** 渲染初始卡片 */
 export function renderTldrInitial(card: any, repoInfo: any, readmeRoot: any, sourceHash: any) {
     card.innerHTML = `
             <div class="Box-header ghcn-tldr-header">
@@ -369,6 +374,7 @@ export function renderTldrInitial(card: any, repoInfo: any, readmeRoot: any, sou
     });
 }
 
+/** 渲染加载态 */
 export function renderTldrLoading(card: any) {
     card.innerHTML = `
             <div class="Box-header ghcn-tldr-header">
@@ -380,6 +386,7 @@ export function renderTldrLoading(card: any) {
         `;
 }
 
+/** 渲染错误态 */
 export function renderTldrError(
     card: any,
     message: any,
@@ -405,6 +412,7 @@ export function renderTldrError(
     });
 }
 
+/** 提取命令信息 */
 export function extractCommandInfo(text: any) {
     if (!text) return null;
 
@@ -436,6 +444,7 @@ export function extractCommandInfo(text: any) {
     return { cmd, note: prefixNote };
 }
 
+/** 格式化行内 Markdown */
 export function formatInlineMarkdown(text: any) {
     let safe = escapeHtml(text || '');
     safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -443,6 +452,7 @@ export function formatInlineMarkdown(text: any) {
     return safe;
 }
 
+/** 转换速读 Markdown */
 export function formatTldrMarkdownToHtml(markdownText: any) {
     if (!markdownText) return '';
 
@@ -455,6 +465,7 @@ export function formatTldrMarkdownToHtml(markdownText: any) {
     const rawLines = normalized.split('\n');
     const mergedLines: any[] = [];
 
+    // 合并续行
     for (let i = 0; i < rawLines.length; i++) {
         const line = rawLines[i].trim();
         if (!line) continue;
@@ -491,7 +502,7 @@ export function formatTldrMarkdownToHtml(markdownText: any) {
             rest = boldMatch[2].trim();
         }
 
-        // 过滤掉 3 秒极简启动等输出，保持速读卡片精炼聚焦
+        // 过滤启动类内容
         if (title.includes('启动') || title.includes('3秒') || cleanLine.includes('3秒极简启动')) {
             return;
         }
@@ -537,6 +548,7 @@ export function formatTldrMarkdownToHtml(markdownText: any) {
     return htmlParts.join('') || escapeHtml(markdownText);
 }
 
+/** 渲染速读内容 */
 export function renderTldrContent(
     card: any,
     contentText: any,
@@ -567,6 +579,7 @@ export function renderTldrContent(
             </div>
         `;
 
+    // 复制命令
     card.querySelectorAll('.ghcn-tldr-copy-cmd').forEach((btn: any) => {
         btn.addEventListener('click', async (e: any) => {
             e.stopPropagation();
@@ -585,11 +598,12 @@ export function renderTldrContent(
                     if (iconWrap) iconWrap.innerHTML = TLDR_ICONS.copy;
                 }, 1600);
             } catch {
-                // Clipboard fallback
+                // 剪贴板兜底
             }
         });
     });
 
+    // 重新提炼
     const refreshBtn = card.querySelector('[data-ghcn-tldr-action="refresh"]');
     refreshBtn?.addEventListener('click', async () => {
         const headerBtn = document.querySelector('[data-ghcn-tldr="header-btn"]');
@@ -603,6 +617,7 @@ export function renderTldrContent(
         }
     });
 
+    // 关闭卡片
     card.querySelector('[data-ghcn-tldr-action="close"]')?.addEventListener('click', () => {
         card.style.display = 'none';
         const headerBtn = document.querySelector('[data-ghcn-tldr="header-btn"]');
@@ -613,6 +628,7 @@ export function renderTldrContent(
     });
 }
 
+/** 生成速读内容 */
 export async function executeTldrGeneration(
     card: any,
     repoInfo: any,
@@ -687,7 +703,7 @@ export async function executeTldrGeneration(
 
         const durationMs = performance.now() - startAt;
 
-        // Save to repo cache
+        // 写入仓库缓存
         await upsertRepoCachedTranslation(cacheKey, {
             repo: repoInfo.fullName,
             sourceHash: activeSourceHash,
@@ -697,7 +713,7 @@ export async function executeTldrGeneration(
             console.warn('[速读胶囊] 写入缓存失败:', err);
         });
 
-        // Append record
+        // 写入翻译记录
         await appendReadmeTranslationRecord({
             repo: repoInfo.fullName,
             sourceType: 'tldr',
@@ -733,6 +749,7 @@ export async function executeTldrGeneration(
     }
 }
 
+/** 注入速读样式 */
 export function injectTldrCapsuleStyles() {
     if (document.getElementById('ghcn-tldr-style')) return;
 

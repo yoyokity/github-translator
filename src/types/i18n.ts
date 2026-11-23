@@ -1,6 +1,6 @@
 /**
  * @file src/types/i18n.ts
- * 词库数据结构（数据边界使用宽类型，避免 3 万行词库产生巨型字面量类型）
+ * 词库数据结构
  */
 
 export type RegexpRule = [RegExp, string];

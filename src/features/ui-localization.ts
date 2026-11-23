@@ -1,11 +1,12 @@
 /**
  * @file src/features/ui-localization.ts
- * 静态界面词库汉化：基于 locals.js 的 DOM 翻译、相对时间转换、React 全局顶栏适配
+ * React 全局顶栏汉化
  */
 
-import { CONFIG, FeatureSet } from '../core/constants';
-import { state } from '../core/state';
+import { CONFIG } from '../core/constants';
+import { FeatureSet, state } from '../core/state';
 
+/** 是否搜索弹层节点 */
 export function isReactGlobalNavPortalNode(node: any) {
     const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
     if (
@@ -83,6 +84,7 @@ export function isReactGlobalNavPortalNode(node: any) {
     );
 }
 
+/** 初始化顶栏翻译 */
 export function setupReactGlobalNavTranslation() {
     if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
@@ -224,7 +226,7 @@ export function setupReactGlobalNavTranslation() {
     function translateReactGlobalNavSurface(surface: any) {
         if (!FeatureSet.enable_extension || !surface) return;
 
-        // textarea 只翻译控件文案，拒绝遍历子节点，避免改写用户输入内容。
+        // textarea 仅翻译属性
         if (surface.nodeType === Node.ELEMENT_NODE && surface.tagName === 'TEXTAREA') {
             translateReactGlobalNavAttributes(surface);
             return;
@@ -262,8 +264,7 @@ export function setupReactGlobalNavTranslation() {
         }
     }
 
-    // 顶部搜索按钮的占位文本把 <kbd> 混排在文字中间（Type <kbd>/</kbd> to search），
-    // 逐个文本节点翻译会把词条拆碎，所以整体取译文后再按受保护片段回填。
+    // 搜索占位符含 kbd，需整体回填
     function translateReactGlobalNavSearchPlaceholder() {
         const placeholder = document.querySelector(
             'header.GlobalNav [class*="Search-module__placeholder__"]',
@@ -283,7 +284,7 @@ export function setupReactGlobalNavTranslation() {
             }
             if (node.nodeType !== Node.ELEMENT_NODE) return;
 
-            // 遇到 kbd 之类不可改写的元素，另起一段
+            // 受保护元素另起一段
             if (node.matches?.(unsafeTextSelector)) {
                 const protectedText = normalizeReactGlobalNavText(node.textContent);
                 if (protectedText) {
@@ -296,7 +297,7 @@ export function setupReactGlobalNavTranslation() {
         };
         placeholder.childNodes.forEach(collectNodes);
 
-        // 用受保护片段把译文切段；切不出来说明词条和 DOM 对不上，直接放弃，别改坏
+        // 按受保护片段切分译文
         const segments: any[] = [];
         let remaining = label;
         for (const protectedText of protectedTexts) {
@@ -465,344 +466,5 @@ export function setupReactGlobalNavTranslation() {
             },
             true,
         );
-    });
-}
-
-/**
- * watchUpdate 函数：监视页面变化，根据变化的节点进行翻译
- */
-
-export function isFallbackRepositoryPath(pathname: any) {
-    const reservedRoots = new Set([
-        'home',
-        'dashboard',
-        'feed',
-        'copilot',
-        'spark',
-        'signup',
-        'account_verifications',
-        'login',
-        'logout',
-        'session',
-        'sessions',
-        'password_reset',
-        'orgs',
-        'organizations',
-        'explore',
-        'topics',
-        'notifications',
-        'watching',
-        'stars',
-        'issues',
-        'pulls',
-        'repos',
-        'search',
-        'trending',
-        'showcases',
-        'new',
-        'import',
-        'settings',
-        'installations',
-        'marketplace',
-        'apps',
-        'account',
-        'projects',
-        'redeem',
-        'discussions',
-        'collections',
-        'sponsors',
-        'sponsoring',
-        'github-copilot',
-        'codespaces',
-        'developer',
-        'features',
-        'security',
-        'sitemap',
-        'education',
-        'mcp',
-        'users',
-        'billing',
-        'plans',
-    ]);
-    const segments = pathname.split('/');
-    if (segments.length < 3) return false;
-
-    const owner = segments[1];
-    const repo = segments[2];
-    const isSegment = (segment: any) => /^[A-Za-z0-9._-]+$/.test(segment) && !/^\.+$/.test(segment);
-    if (!isSegment(owner) || !isSegment(repo) || reservedRoots.has(owner.toLowerCase()))
-        return false;
-
-    const extra = segments.slice(3);
-    const isRoot = extra.length === 0 || (extra.length === 1 && extra[0] === '');
-    if (isRoot) return !['enterprise_plan', 'sponsoring'].includes(repo.toLowerCase());
-    if (extra.some((segment: any) => segment === '' || segment === '.' || segment === '..'))
-        return false;
-    return I18N.conf.rePagePathRepo.test(pathname);
-}
-
-export function detectPageType() {
-    const url = new URL(window.location.href);
-    const { SPECIAL_SITES } = CONFIG;
-    const { hostname, pathname } = url;
-
-    // 基础配置 ===============================================
-    const site = (CONFIG.PAGE_MAP as Record<string, string>)[hostname] || 'github'; // 通过站点映射获取基础类型
-    const isLogin = document.body.classList.contains('logged-in');
-    const metaLocation =
-        document.head.querySelector('meta[name="analytics-location"]')?.getAttribute('content') ||
-        '';
-
-    // 页面特征检测 ============================================
-    const isSession = document.body.classList.contains('session-authentication');
-    const isHomepage = pathname === '/' && site === 'github';
-    const isProfile =
-        document.body.classList.contains('page-profile') || metaLocation === '/<user-name>';
-    // analytics-location 带 data-turbo-transient，Turbo 软导航时可能暂时缺失。
-    // 使用与当前 URL 一致的仓库元数据和两级路径结构兜底，避免仓库页整页跳过翻译。
-    const repositoryNwo =
-        document.head
-            .querySelector('meta[name="octolytics-dimension-repository_nwo"]')
-            ?.getAttribute('content')
-            ?.trim() || '';
-    const pathRepository = pathname.split('/').slice(1, 3).join('/');
-    const hasRepositoryMetadata =
-        hostname === 'github.com' &&
-        /^[^/]+\/[^/]+$/.test(repositoryNwo) &&
-        repositoryNwo.toLowerCase() === pathRepository.toLowerCase();
-    const isRepository =
-        /\/<user-name>\/<repo-name>/.test(metaLocation) ||
-        hasRepositoryMetadata ||
-        (site === 'github' && isFallbackRepositoryPath(pathname));
-    const isOrganization =
-        /\/<org-login>/.test(metaLocation) || /^\/(?:orgs|organizations)/.test(pathname);
-
-    // 正则配置 ================================================
-    const { rePagePathRepo, rePagePathOrg, rePagePath } = I18N.conf;
-
-    // 核心判断逻辑 ============================================
-    let pageType: any;
-    switch (
-        true // 使用 switch(true) 模式处理多条件分支
-    ) {
-        // 1. 登录相关页面
-        case isSession:
-            pageType = 'session-authentication';
-            break;
-
-        // 2. 特殊站点类型（gist/status/skills/education）
-        case SPECIAL_SITES.includes(site):
-            pageType = site;
-            break;
-
-        // 3. 个人资料页
-        case isProfile:
-            const tabParam = new URLSearchParams(url.search).get('tab');
-            pageType = pathname.includes('/stars')
-                ? 'page-profile/stars'
-                : tabParam
-                  ? `page-profile/${tabParam}`
-                  : 'page-profile';
-            break;
-
-        // 4. 首页/仪表盘
-        case isHomepage:
-            pageType = isLogin ? 'dashboard' : 'homepage';
-            break;
-
-        // 5. 代码仓库页
-        case isRepository:
-            const repoMatch = pathname.match(rePagePathRepo);
-            pageType = repoMatch ? `repository/${repoMatch[1]}` : 'repository';
-            break;
-
-        // 6. 组织页面
-        case isOrganization:
-            const orgMatch = pathname.match(rePagePathOrg);
-            pageType = orgMatch ? `orgs/${orgMatch[1] || orgMatch.slice(-1)[0]}` : 'orgs';
-            break;
-
-        // 7. 默认处理逻辑
-        default:
-            const pathMatch = pathname.match(rePagePath);
-            pageType = pathMatch ? pathMatch[1] || pathMatch.slice(-1)[0] : false;
-    }
-
-    // 词库校验 ================================================
-    if (pageType === false || !I18N[CONFIG.LANG]?.[pageType]) {
-        return false; // 明确返回 false 表示异常
-    }
-
-    return pageType;
-}
-
-/**
- * transTitle 函数：翻译页面标题
- */
-export function transTitle() {
-    if (!FeatureSet.enable_extension) return;
-    const text = document.title; // 获取标题文本内容
-    let translatedText = state.pageConfig.titleStaticDict[text] || '';
-    if (!translatedText) {
-        for (const [pattern, replacement] of state.pageConfig.titleRegexpRules) {
-            translatedText = text.replace(pattern, replacement);
-            if (translatedText !== text) break;
-        }
-    }
-    if (translatedText) {
-        document.title = translatedText;
-    }
-}
-
-/**
- * transTimeElement 函数：翻译时间元素文本内容。
- * @param {Element} el - 需要翻译的元素。
- */
-export function transTimeElement(el: any) {
-    if (!FeatureSet.enable_extension || !el) return;
-
-    // 时间文本形如 "on Jul 15"，中文语序里不需要这个 on。
-    // 前面可能带空白，且部分版本会把 "opened on" 合并到同一个文本节点。
-    // 同时只改承载文本的那个节点，避免用 el.textContent 赋值抹掉同级节点。
-    const target = el.childNodes.length > 0 ? el.lastChild : el;
-    const text = target.textContent;
-    if (!text) return;
-
-    const translatedText = text.replace(/\bon\s+/gi, (match: any, offset: any) =>
-        offset === 0 ? ' ' : '',
-    );
-    if (translatedText !== text) {
-        target.textContent = translatedText;
-    }
-}
-
-/**
- * transElement 函数：翻译指定元素的文本内容或属性。
- * @param {Element|DOMStringMap} el - 需要翻译的元素或元素的数据集 (node.dataset)。
- * @param {string} field - 需要翻译的属性名称或文本内容字段。
- */
-export function transElement(el: any, field: any) {
-    if (!FeatureSet.enable_extension) return false;
-    const text = el[field]; // 获取需要翻译的文本
-    if (!text) return false; // 当 text 为空时，退出函数
-
-    const translatedText = transText(text); // 翻译后的文本
-    if (translatedText) {
-        el[field] = translatedText; // 替换翻译后的内容
-    }
-}
-
-/**
- * transText 函数：翻译文本内容。
- * @param {string} text - 需要翻译的文本内容。
- * @returns {string|boolean} 翻译后的文本内容，如果没有找到对应的翻译，那么返回 false。
- */
-export function transText(text: any) {
-    // 判断是否需要跳过翻译
-    //  1. 检查内容是否为空或者仅包含空白字符或数字。
-    //  2. 检查内容是否仅包含中文字符。
-    //  3. 检查内容是否不包含英文字母和符号。
-    const shouldSkip = (text: any) =>
-        /^[\s0-9]*$/.test(text) || /^[\u4e00-\u9fa5]+$/.test(text) || !/[a-zA-Z,.]/.test(text);
-    if (shouldSkip(text)) return false;
-
-    // 清理文本内容
-    const trimmedText = text.trim(); // 去除首尾空格
-    const cleanedText = trimmedText.replace(/\xa0|[\s]+/g, ' '); // 去除多余空白字符（包括 &nbsp; 空格 换行符）
-
-    // 尝试获取翻译结果
-    const translatedText = fetchTranslatedText(cleanedText);
-
-    // 如果找到翻译并且不与清理后的文本相同，则返回替换后的结果
-    if (translatedText && translatedText !== cleanedText) {
-        return text.replace(trimmedText, translatedText); // 替换原字符，保留首尾空白部分
-    }
-
-    return false;
-}
-
-/**
- * fetchTranslatedText 函数：从特定页面的词库中获得翻译文本内容。
- * @param {string} text - 需要翻译的文本内容。
- * @returns {string|boolean} 翻译后的文本内容，如果没有找到对应的翻译，那么返回 false。
- */
-export function fetchTranslatedText(text: any) {
-    const cachedText = state.pageConfig.textCache.get(text);
-    if (cachedText !== undefined) return cachedText;
-
-    // 静态翻译
-    let translatedText = state.pageConfig.staticDict[text]; // 默认翻译 公共部分
-
-    if (typeof translatedText === 'string') {
-        state.pageConfig.textCache.set(text, translatedText);
-        return translatedText;
-    }
-
-    // 正则翻译
-    for (const [pattern, replacement] of state.pageConfig.regexpRules) {
-        translatedText = text.replace(pattern, replacement);
-        if (translatedText !== text) {
-            state.pageConfig.textCache.set(text, translatedText);
-            return translatedText;
-        }
-    }
-
-    state.pageConfig.textCache.set(text, false);
-    return false; // 没有翻译条目
-}
-
-/**
- * transBySelector 函数：通过 CSS 选择器找到页面上的元素，并将其文本内容替换为预定义的翻译。
- */
-export function transBySelector() {
-    if (!FeatureSet.enable_extension) return;
-    // 遍历每个翻译规则
-    state.pageConfig.tranSelectors?.forEach(([selector, translatedText]: any) => {
-        // 使用 CSS 选择器找到对应的元素
-        const element = document.querySelector(selector);
-        // 如果找到了元素，那么将其文本内容替换为翻译后的文本
-        if (element) {
-            element.textContent = translatedText;
-        }
-    });
-
-    // /copilot/agents 页面结构是动态渲染，使用强制替换兜底，避免分段命中失败
-    applyCopilotAgentsOverrides();
-}
-
-export function applyCopilotAgentsOverrides() {
-    if (
-        window.location.hostname !== 'github.com' ||
-        window.location.pathname !== '/copilot/agents'
-    ) {
-        return;
-    }
-
-    const setText = (selector: any, text: any) => {
-        const el = document.querySelector(selector);
-        if (el) el.textContent = text;
-    };
-
-    setText('h2.Blankslate-Heading', 'Copilot 云端智能体处理例行任务，让您专注于核心工作');
-    setText(
-        'p.Blankslate-Description',
-        '将测试、依赖项升级、迁移和维护等工作交给智能体处理，节省您的时间。您可以通过 Copilot Chat、命令行、IDE 创建拉取请求，或直接将议题分配给 Copilot 来开始使用。',
-    );
-    setText('.BannerDescription', '仅在付费计划中可用。试用 Copilot Pro，可免费 30 天。');
-
-    // 兼容不同结构：链接文案可能被拆分或已部分翻译
-    document.querySelectorAll('a').forEach((el: any) => {
-        const text = (el.textContent || '').trim();
-        if (/capabilities/i.test(text)) {
-            el.textContent = '查看 Copilot 云端智能体能力';
-        }
-    });
-
-    // 试用按钮文案兜底
-    document.querySelectorAll('button, a').forEach((el: any) => {
-        const text = (el.textContent || '').trim();
-        if (/^start\s+free\s+trial$/i.test(text)) {
-            el.textContent = '开始免费试用';
-        }
     });
 }

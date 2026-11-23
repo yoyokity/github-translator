@@ -61,11 +61,13 @@ const TARGETS: BuildTarget[] = [
 const JS_OUTPUTS = ENTRIES.map((entry) => entry.output);
 const ICONS = ['icon16.png', 'icon32.png', 'icon48.png', 'icon128.png', 'icon512.png'];
 
+/** 清理产物 */
 async function clean(): Promise<void> {
     await fsp.rm(DIST, { recursive: true, force: true });
     await fsp.mkdir(STAGING, { recursive: true });
 }
 
+/** 打包入口 */
 async function bundle(): Promise<void> {
     for (const entry of ENTRIES) {
         console.log(`[build] Bundling ${entry.input} -> ${entry.output}`);
@@ -96,6 +98,7 @@ async function bundle(): Promise<void> {
     }
 }
 
+/** 复制文件 */
 async function copyFile(
     relativeSource: string,
     targetDir: string,
@@ -109,6 +112,7 @@ async function copyFile(
     await fsp.copyFile(source, destination);
 }
 
+/** 组装单端产物 */
 async function assembleTarget(target: BuildTarget): Promise<void> {
     const targetDir = path.join(DIST, target.name);
     await fsp.mkdir(targetDir, { recursive: true });
@@ -139,6 +143,7 @@ async function assembleTarget(target: BuildTarget): Promise<void> {
     );
 }
 
+/** 校验脚本可执行 */
 function validateJavaScript(targetDir: string): void {
     for (const output of JS_OUTPUTS) {
         const file = path.join(targetDir, output);
@@ -151,6 +156,7 @@ function validateJavaScript(targetDir: string): void {
     }
 }
 
+/** 校验端产物 */
 async function validateTarget(target: BuildTarget): Promise<void> {
     const targetDir = path.join(DIST, target.name);
     const manifest = JSON.parse(
@@ -188,6 +194,7 @@ async function validateTarget(target: BuildTarget): Promise<void> {
     validateJavaScript(targetDir);
 }
 
+/** 校验三端一致 */
 async function validateConsistency(): Promise<void> {
     const reference = path.join(DIST, TARGETS[0].name);
     for (const output of JS_OUTPUTS) {
@@ -201,6 +208,7 @@ async function validateConsistency(): Promise<void> {
     }
 }
 
+/** 输出体积报告 */
 function report(): void {
     console.log('\n[build] Output:');
     for (const target of TARGETS) {
@@ -218,6 +226,7 @@ function report(): void {
     }
 }
 
+/** 构建入口 */
 async function main(): Promise<void> {
     console.log(`[build] github-translator v${PACKAGE.version}`);
     await clean();

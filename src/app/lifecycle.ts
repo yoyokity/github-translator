@@ -1,10 +1,12 @@
 /**
- * @file src/core/dom-observer.ts
- * DOM 监听与 SPA 路由跳转守卫：MutationObserver、Turbo 监听与 DOM 遍历
+ * @file src/app/lifecycle.ts
+ * 页面生命周期与开关调度
  */
 
-import { CONFIG, FeatureSet, STORAGE_DEFAULTS, readmeRuntime } from './constants';
-import { state } from './state';
+import { CONFIG, STORAGE_DEFAULTS } from '../core/constants';
+import { buildPageConfig, traverseNode } from '../core/dom-walker';
+import { detectPageType, transBySelector, transTitle } from '../core/page-translation';
+import { FeatureSet, readmeRuntime, state } from '../core/state';
 import {
     restoreCollaborationHelperControls,
     scheduleCollaborationHelperControls,
@@ -18,20 +20,15 @@ import {
     scheduleReadmeTranslation,
 } from '../features/markdown-translation';
 import { restoreTldrCapsuleControls, scheduleTldrCapsuleControls } from '../features/tldr-capsule';
-import {
-    detectPageType,
-    isReactGlobalNavPortalNode,
-    transBySelector,
-    transElement,
-    transTimeElement,
-    transTitle,
-} from '../features/ui-localization';
+import { isReactGlobalNavPortalNode } from '../features/ui-localization';
 
+/** 加载功能开关 */
 export async function loadFeatureSet() {
     const result = await chrome.storage.sync.get(STORAGE_DEFAULTS);
     Object.assign(FeatureSet, result);
 }
 
+/** 刷新当前页翻译 */
 export function refreshCurrentPageTranslations() {
     if (!state.pageConfig.currentPageType || !document.body) return;
     traverseNode(document.body);
@@ -44,11 +41,7 @@ export function refreshCurrentPageTranslations() {
     scheduleTldrCapsuleControls('refreshCurrentPageTranslations');
 }
 
-/**
- * Turbo 软导航后整页/片段可能被替换为未翻译英文，且返回时 react-partial
- * 往往已是 .loaded，hydration watcher 不会再触发。MutationObserver 也可能
- * 输给随后的 React reconcile。因此在 turbo:load 后做短延迟全量扫描。
- */
+/** Turbo 后整页扫描 */
 export function translateTurboSettledDom() {
     if (!FeatureSet.enable_extension || !state.pageConfig.currentPageType || !document.body) return;
     traverseNode(document.body);
@@ -56,6 +49,7 @@ export function translateTurboSettledDom() {
     transBySelector();
 }
 
+/** 延迟多次扫描页面 */
 export function scheduleTurboPageTranslation() {
     translateTurboSettledDom();
     state.scheduleReactGlobalNavRefresh();
@@ -64,6 +58,7 @@ export function scheduleTurboPageTranslation() {
     });
 }
 
+/** 是否 README 设置键 */
 export function isReadmeSettingKey(key: any) {
     return (
         key === 'enable_readme_translation' ||
@@ -77,10 +72,11 @@ export function isReadmeSettingKey(key: any) {
 export let featureChangeTimer = 0;
 export const pendingChangedKeys = new Set();
 
+/** 批量应用开关变更 */
 export function applyBatchedFeatureToggles(changedKeys: any) {
     if (!changedKeys.length) return;
 
-    // 1. 全局开关状态变化处理
+    // 全局开关
     if (changedKeys.includes('enable_extension')) {
         const isEnabled = Boolean(FeatureSet.enable_extension);
         if (isEnabled) {
@@ -94,7 +90,7 @@ export function applyBatchedFeatureToggles(changedKeys: any) {
         }
     }
 
-    // 2. 批量处理 README / AI 设置变更，单批次仅执行一次重置与调度
+    // README / AI 设置
     const hasReadmeSettingsChange = changedKeys.some(isReadmeSettingKey);
     if (hasReadmeSettingsChange) {
         readmeRuntime.translationCache.clear();
@@ -134,11 +130,7 @@ export function applyBatchedFeatureToggles(changedKeys: any) {
     }
 }
 
-export function handleFeatureToggle(key: any, newFeatureState: any) {
-    FeatureSet[key] = newFeatureState;
-    applyBatchedFeatureToggles([key]);
-}
-
+/** 监听配置变化 */
 export function watchFeatureChanges() {
     chrome.storage.onChanged.addListener((changes: any, areaName: any) => {
         if (areaName !== 'sync') return;
@@ -153,7 +145,7 @@ export function watchFeatureChanges() {
 
         if (!hasValidChange) return;
 
-        // 60ms 微防抖，合并 options 页保存时多项配置同时写入的多次 onChanged 触发，防止多 Tab 页面同时频繁重绘闪烁
+        // 60ms 防抖，合并多次写入
         if (featureChangeTimer) {
             window.clearTimeout(featureChangeTimer);
         }
@@ -167,7 +159,7 @@ export function watchFeatureChanges() {
     });
 }
 
-// 更新页面设置
+/** 更新页面配置 */
 export function updatePageConfig(currentPageChangeTrigger: any, force: any = false) {
     const newType = detectPageType();
     if (newType && (force || newType !== state.pageConfig.currentPageType)) {
@@ -179,6 +171,7 @@ export function updatePageConfig(currentPageChangeTrigger: any, force: any = fal
     }
 }
 
+/** 路由变化后刷新 */
 export function refreshAfterHistoryNavigation(trigger: any = '历史导航') {
     if (!FeatureSet.enable_extension || !document.body) return;
 
@@ -191,6 +184,7 @@ export function refreshAfterHistoryNavigation(trigger: any = '历史导航') {
     scheduleTldrCapsuleControls(trigger);
 }
 
+/** 合并历史刷新 */
 export function scheduleHistoryRefresh(event: any) {
     if (state.historyRefreshTimer !== null) window.clearTimeout(state.historyRefreshTimer);
     state.historyRefreshTimer = window.setTimeout(() => {
@@ -199,71 +193,22 @@ export function scheduleHistoryRefresh(event: any) {
     }, 0);
 }
 
-// 构建页面设置 state.pageConfig 对象
-export function buildPageConfig(pageType: any = state.pageConfig.currentPageType) {
-    return {
-        // 当前页面类型
-        currentPageType: pageType,
-        textCache: new Map(),
-        // 页面标题静态词库
-        titleStaticDict: Object.assign(
-            {},
-            I18N[CONFIG.LANG].public.title.static,
-            I18N[CONFIG.LANG][pageType]?.title?.static,
-        ),
-        // 页面标题正则词库
-        titleRegexpRules: I18N[CONFIG.LANG].public.title.regexp.concat(
-            I18N[CONFIG.LANG][pageType]?.title?.regexp || [],
-        ),
-        // 静态词库
-        staticDict: Object.assign(
-            {},
-            I18N[CONFIG.LANG].public.static,
-            I18N[CONFIG.LANG][pageType]?.static,
-        ),
-        // 正则词库
-        regexpRules: [
-            ...(I18N[CONFIG.LANG][pageType]?.regexp || []),
-            ...I18N[CONFIG.LANG].public.regexp,
-        ],
-        // 忽略突变元素选择器（字符串）
-        ignoreMutationSelectors: [
-            ...I18N.conf.ignoreMutationSelectorPage['*'],
-            ...(I18N.conf.ignoreMutationSelectorPage[pageType] || []),
-        ].join(', '),
-        // 忽略元素选择器规则（字符串）
-        ignoreSelectors: [
-            ...I18N.conf.ignoreSelectorPage['*'],
-            ...(I18N.conf.ignoreSelectorPage[pageType] || []),
-        ].join(', '),
-        // 字符数据监视开启规则（布尔值）
-        characterData: I18N.conf.characterDataPage.includes(pageType),
-        maxTextNodeLength: I18N.conf.maxTextNodeLengthPage?.[pageType] ?? 500,
-        // CSS 选择器规则
-        tranSelectors: [
-            ...(I18N[CONFIG.LANG].public.selector || []),
-            ...(I18N[CONFIG.LANG][pageType]?.selector || []),
-        ],
-    };
-}
-
+/** 监听 DOM 变化 */
 export function watchUpdate() {
-    // 缓存当前页面的 URL
+    // 缓存当前 URL
     let previousURL = window.location.href;
     let observer: any = null;
     let observedBody: any = null;
 
     const handleUrlChange = () => {
         const currentURL = window.location.href;
-        // 如果页面的 URL 发生变化
         if (currentURL !== previousURL) {
             previousURL = currentURL;
             updatePageConfig('DOM变化');
         }
     };
 
-    // textarea 可能位于 header.GlobalNav 等忽略祖先下，但其 placeholder 和 aria-label
-    // 仍是控件文案；value、子文本和 contenteditable 内容继续保持不翻译。
+    // 弹层与下拉
     const LIVE_SURFACE_SELECTOR = [
         '[role="menu"]',
         '[role="listbox"]',
@@ -273,6 +218,7 @@ export function watchUpdate() {
         '.Popover',
         '.dropdown-menu',
     ].join(', ');
+    // 搜索框
     const SEARCH_QUERY_SELECTOR = [
         '#search-suggestions-dialog',
         '[aria-label="Quick search"]',
@@ -308,25 +254,20 @@ export function watchUpdate() {
     };
 
     const processMutations = (mutations: any) => {
-        // 平铺突变记录并过滤需要处理的节点（链式操作）
-        // 使用 mutations.flatMap 进行筛选突变:
-        //   1. 针对`节点增加`突变，后期迭代翻译的对象调整为`addedNodes`中记录的新增节点，而不是`target`，此举大幅减少重复迭代翻译
-        //   2. 对于其它`属性`和特定页面`文本节点`突变，仍旧直接处理`target`
-        //   3. 使用`.filter()`筛选丢弃特定页面`特定忽略元素`内突变的节点
         mutations
             .flatMap(({ target, addedNodes, type, attributeName }: any) => {
-                // 处理子节点添加的情况
+                // 新增节点优先
                 if (type === 'childList' && addedNodes.length > 0) {
-                    return [...addedNodes].map((node: any) => ({ node, type, attributeName })); // 将新增节点转换为数组
+                    return [...addedNodes].map((node: any) => ({ node, type, attributeName }));
                 }
-                // 处理属性和文本内容变更的情况
+                // 属性与文本变更
                 return type === 'attributes' ||
                     (type === 'characterData' &&
                         (state.pageConfig.characterData || isLiveSurfaceCharacterData(target)))
-                    ? [{ node: target, type, attributeName }] // 否则，仅处理目标节点
+                    ? [{ node: target, type, attributeName }]
                     : [];
             })
-            // 过滤需要忽略的突变节点
+            // 过滤忽略节点
             .filter(({ node, type, attributeName }: any) => {
                 const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
                 return (
@@ -337,14 +278,11 @@ export function watchUpdate() {
                             (type === 'characterData' && isLiveSurfaceCharacterData(node))))
                 );
             })
-            // 处理每个变化
-            .forEach(({ node }: any) =>
-                // 递归遍历节点树进行处理
-                traverseNode(node),
-            );
+            // 逐节点遍历翻译
+            .forEach(({ node }: any) => traverseNode(node));
     };
 
-    // 监听 document.body 下 DOM 变化，用于处理节点变化
+    // 处理一批突变
     const processMutationBatch = (mutations: any) => {
         if (!FeatureSet.enable_extension) return;
         handleUrlChange();
@@ -376,145 +314,3 @@ export function watchUpdate() {
         if (document.body !== observedBody) observeCurrentBody();
     };
 }
-
-/**
- * GitHub 的 SSR React 组件在 hydration 完成后才添加 loaded 类。
- * 在此之前改写文本会造成 hydration 失败，并让组件交互失效。
- */
-export function watchReactHydration() {
-    const handleLoadedReactRoot = (element: any) => {
-        if (
-            !FeatureSet.enable_extension ||
-            !state.pageConfig.currentPageType ||
-            !element.matches?.('react-app.loaded, react-partial.loaded')
-        ) {
-            return;
-        }
-
-        traverseNode(element);
-    };
-
-    const observer = new MutationObserver((mutations: any) => {
-        mutations.forEach(({ target, type }: any) => {
-            if (type === 'attributes') handleLoadedReactRoot(target);
-        });
-    });
-
-    observer.observe(document.body, {
-        attributes: true,
-        subtree: true,
-        attributeFilter: ['class'],
-    });
-
-    // 避免组件恰好在观察器启动前完成 hydration 而漏翻译
-    document
-        .querySelectorAll('react-app.loaded, react-partial.loaded')
-        .forEach(handleLoadedReactRoot);
-}
-
-/**
- * traverseNode 函数：遍历指定的节点，并对节点进行翻译。
- * @param {Node} node - 需要遍历的节点。
- */
-export function traverseNode(rootNode: any) {
-    if (!FeatureSet.enable_extension) return;
-
-    const handleTextNode = (node: any) => {
-        if (node.length > (state.pageConfig.maxTextNodeLength ?? 500)) return;
-        transElement(node, 'data');
-    };
-
-    // textarea 的文本子节点就是用户正在输入的内容，翻译它会直接篡改输入。
-    // 这里单独拦文本节点，而不是把 textarea 放进 ignoreSelectors，
-    // 否则 handleElement 里的 placeholder / value 属性翻译会被一并跳过。
-    const isUserInputText = (node: any) => node.parentElement?.tagName === 'TEXTAREA';
-
-    // 如果 rootNode 是文本节点，直接处理
-    if (rootNode.nodeType === Node.TEXT_NODE) {
-        if (!isUserInputText(rootNode)) handleTextNode(rootNode);
-        return; // 文本节点没有子节点，直接返回
-    }
-
-    const treeWalker = document.createTreeWalker(
-        rootNode,
-        NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
-        (node: any) => {
-            // 跳过用户输入内容
-            if (node.nodeType === Node.TEXT_NODE) {
-                return isUserInputText(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
-            }
-            // 跳过忽略的节点
-            return node.matches?.(state.pageConfig.ignoreSelectors)
-                ? NodeFilter.FILTER_REJECT
-                : NodeFilter.FILTER_ACCEPT;
-        },
-    );
-
-    const handleElement = (node: any) => {
-        // 处理不同标签的元素属性翻译
-        switch (node.tagName) {
-            case 'RELATIVE-TIME': // 翻译时间元素
-                transTimeElement(node.shadowRoot);
-                return;
-
-            case 'INPUT':
-            case 'TEXTAREA': // 输入框 按钮 文本域
-                if (['button', 'submit', 'reset'].includes(node.type)) {
-                    transElement(node.dataset, 'confirm'); // 翻译 浏览器 提示对话框
-                    transElement(node, 'value');
-                } else {
-                    transElement(node, 'placeholder');
-                }
-                transElement(node, 'ariaLabel');
-                break;
-
-            case 'OPTGROUP':
-                transElement(node, 'label'); // 翻译 <optgroup> 的 label 属性
-                break;
-
-            case 'BUTTON':
-                transElement(node, 'title'); // 翻译 浏览器 提示对话框
-                transElement(node.dataset, 'confirm'); // 翻译 浏览器 提示对话框 ok
-                transElement(node.dataset, 'confirmText'); // 翻译 浏览器 提示对话框 ok
-                transElement(node.dataset, 'confirmCancelText'); // 取消按钮 提醒
-                transElement(node, 'cancelConfirmText'); // 取消按钮 提醒
-                transElement(node.dataset, 'disableWith'); // 按钮等待提示
-                if (/tooltipped/.test(node.className)) transElement(node, 'ariaLabel');
-                break;
-
-            case 'A':
-            case 'SPAN':
-                transElement(node, 'title'); // title 属性
-                transElement(node.dataset, 'visibleText'); // 翻译 浏览器 提示对话框 ok
-                if (/tooltipped/.test(node.className)) transElement(node, 'ariaLabel');
-                break;
-
-            default:
-                // 仅当 元素存在'tooltipped'样式 aria-label 才起效果
-                if (/tooltipped/.test(node.className)) transElement(node, 'ariaLabel'); // 带提示的元素，类似 tooltip 效果的
-                break;
-        }
-    };
-
-    // TreeWalker 不会访问根节点；textarea 根节点仍需翻译控件文案，但不遍历输入内容。
-    if (rootNode.nodeType === Node.ELEMENT_NODE && rootNode.tagName === 'TEXTAREA') {
-        handleElement(rootNode);
-        return;
-    }
-
-    // 预绑定处理函数提升性能
-    const handlers: Record<number, (node: any) => void> = {
-        [Node.ELEMENT_NODE]: handleElement,
-        [Node.TEXT_NODE]: handleTextNode,
-    };
-
-    let currentNode: any;
-    while ((currentNode = treeWalker.nextNode())) {
-        handlers[currentNode.nodeType]?.(currentNode);
-    }
-}
-
-/**
- * detectPageType 函数：检测当前页面类型，基于URL、元素类名和meta信息。
- * @returns {string|boolean} 页面的类型，如'repository'、'dashboard'等，如果无法确定类型，那么返回 false。
- */

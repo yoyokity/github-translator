@@ -14,7 +14,7 @@ import {
     shouldSkipReadmeByLanguage,
     shouldSkipReadmeText,
 } from '../src/core/text-filter';
-import { mapTargetLangForAzure, mapTargetLangForDeepL } from '../src/providers/provider-config';
+import { mapTargetLangForAzure, mapTargetLangForDeepL } from '../src/core/provider-protocol';
 import { parseOpenAiArray, stripOpenAiReasoningBlocks } from '../src/providers/cloud-translators';
 
 function normalize(value: any): any {

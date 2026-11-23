@@ -1,12 +1,14 @@
 /**
  * @file src/core/storage-cache.ts
- * 多级缓存、仓库信息抽取、本地存储读写与 Token 消耗统计
+ * 缓存、仓库信息与本地存储
  */
 
-import { FeatureSet, README_CONFIG, README_LOCAL_STORAGE_KEYS, readmeRuntime } from './constants';
+import { README_CONFIG, README_LOCAL_STORAGE_KEYS } from './constants';
+import { FeatureSet, readmeRuntime } from './state';
 import { normalizeText } from './text-filter';
-import { containsObjectObjectArtifact, createHash, truncateText } from './utils';
+import { isObjectObjectArtifact, createHash, truncateText } from './utils';
 
+/** 从路径解析仓库标识 */
 export function buildRepoIdentifierFromPath(pathname: any) {
     if (!pathname) return '';
     const match = String(pathname).match(/^\/([^/]+)\/([^/]+)/);
@@ -25,6 +27,7 @@ export function buildRepoIdentifierFromPath(pathname: any) {
     return owner && repo ? `${owner}/${repo}` : '';
 }
 
+/** 获取当前仓库信息 */
 export function getCurrentRepoInfo() {
     const fullName = buildRepoIdentifierFromPath(window.location.pathname);
     if (!fullName) return null;
@@ -34,17 +37,20 @@ export function getCurrentRepoInfo() {
     return { owner, repo, fullName };
 }
 
+/** 生成仓库缓存键 */
 export function buildRepoCacheKey(repoInfo: any, sourceHash: any, signature: any) {
     if (!repoInfo?.owner || !repoInfo?.repo || !sourceHash || !signature) return '';
     return `${String(repoInfo.owner).toLowerCase()}/${String(repoInfo.repo).toLowerCase()}|${sourceHash}|${signature}`;
 }
 
+/** 计算 README 文本哈希 */
 export function getStableReadmeTextHash(html: any) {
     const container = document.createElement('div');
     container.innerHTML = String(html || '');
     return createHash(normalizeText(container.textContent || ''));
 }
 
+/** 截取最近的翻译记录 */
 export function trimTranslationRecords(records: any, maxEntries: any) {
     const list = Array.isArray(records) ? records : [];
     const limit = Math.max(1, Number(maxEntries) || 1);
@@ -54,6 +60,7 @@ export function trimTranslationRecords(records: any, maxEntries: any) {
         .slice(0, limit);
 }
 
+/** 读取 token 用量 */
 export function getReadmeUsageTokens(payload: any) {
     const usage = payload?.usage;
     if (!usage || typeof usage !== 'object') return 0;
@@ -69,10 +76,12 @@ export function getReadmeUsageTokens(payload: any) {
     return Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
 }
 
+/** 生成记录 ID */
 export function generateRecordId() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** 判断插件上下文失效 */
 export function isExtensionContextInvalidatedError(error: any) {
     const message = String(error?.message || error || '');
     return (
@@ -82,6 +91,7 @@ export function isExtensionContextInvalidatedError(error: any) {
     );
 }
 
+/** 归一化运行期错误信息 */
 export function normalizeRuntimeErrorMessage(error: any) {
     if (isExtensionContextInvalidatedError(error)) {
         return '插件上下文已失效，请刷新当前 GitHub 页面后重试。';
@@ -89,21 +99,21 @@ export function normalizeRuntimeErrorMessage(error: any) {
 
     if (error instanceof Error) return error.message;
 
-    // chrome.runtime.lastError 及后台回传的错误常是带 message 的普通对象，
-    // 直接 String() 会得到无意义的 "[object Object]"，需先取出可读信息。
+    // 普通对象优先取 message
     if (error && typeof error === 'object') {
         if (typeof error.message === 'string' && error.message.trim()) return error.message;
         try {
             const json = JSON.stringify(error);
             if (json && json !== '{}') return json;
         } catch {
-            /* 循环引用等，退回下方兜底 */
+            /* 循环引用时兜底 */
         }
     }
 
     return String(error || '翻译失败');
 }
 
+/** 归一化仓库缓存条目 */
 export function normalizeRepoCacheEntries(entries: any) {
     const list = Array.isArray(entries) ? entries : [];
 
@@ -113,9 +123,9 @@ export function normalizeRepoCacheEntries(entries: any) {
                 item &&
                 typeof item.key === 'string' &&
                 ((typeof item.translatedHtml === 'string' &&
-                    !containsObjectObjectArtifact(item.translatedHtml)) ||
+                    !isObjectObjectArtifact(item.translatedHtml)) ||
                     (typeof item.tldrContent === 'string' &&
-                        !containsObjectObjectArtifact(item.tldrContent))),
+                        !isObjectObjectArtifact(item.tldrContent))),
         )
         .map((item: any) => ({
             key: item.key,
@@ -130,6 +140,7 @@ export function normalizeRepoCacheEntries(entries: any) {
         .slice(0, README_CONFIG.REPO_CACHE_MAX_ENTRIES);
 }
 
+/** 读取本地存储 */
 export async function getLocalValue(key: any, fallbackValue: any) {
     try {
         const result = await chrome.storage.local.get({ [key]: fallbackValue });
@@ -142,6 +153,7 @@ export async function getLocalValue(key: any, fallbackValue: any) {
     }
 }
 
+/** 写入本地存储 */
 export async function setLocalValue(key: any, value: any) {
     try {
         await chrome.storage.local.set({ [key]: value });
@@ -153,6 +165,7 @@ export async function setLocalValue(key: any, value: any) {
     }
 }
 
+/** 确保仓库缓存已加载 */
 export async function ensureRepoCacheLoaded() {
     if (readmeRuntime.repoCacheLoaded) return;
 
@@ -166,6 +179,7 @@ export async function ensureRepoCacheLoaded() {
     readmeRuntime.repoCacheLoaded = true;
 }
 
+/** 读取仓库缓存译文 */
 export async function getRepoCachedTranslation(cacheKey: any, options: any = {}) {
     if (!FeatureSet.readme_enable_repo_cache || !cacheKey) return null;
     await ensureRepoCacheLoaded();
@@ -177,16 +191,17 @@ export async function getRepoCachedTranslation(cacheKey: any, options: any = {})
     return entry;
 }
 
+/** 写入仓库缓存译文 */
 export async function upsertRepoCachedTranslation(cacheKey: any, value: any) {
     if (!FeatureSet.readme_enable_repo_cache || !cacheKey) return;
     const hasHtml =
         typeof value?.translatedHtml === 'string' &&
         value.translatedHtml.length <= README_CONFIG.MAX_CACHE_HTML_CHARS &&
-        !containsObjectObjectArtifact(value.translatedHtml);
+        !isObjectObjectArtifact(value.translatedHtml);
     const hasTldr =
         typeof value?.tldrContent === 'string' &&
         value.tldrContent.length <= README_CONFIG.MAX_CACHE_HTML_CHARS &&
-        !containsObjectObjectArtifact(value.tldrContent);
+        !isObjectObjectArtifact(value.tldrContent);
 
     if (!hasHtml && !hasTldr) return;
 
@@ -205,6 +220,7 @@ export async function upsertRepoCachedTranslation(cacheKey: any, value: any) {
         updatedAt: Date.now(),
     });
 
+    // 按更新时间裁剪
     const entries = normalizeRepoCacheEntries([...readmeRuntime.repoCacheMap.values()]);
     readmeRuntime.repoCacheMap.clear();
     entries.forEach((entry: any) => {
@@ -214,6 +230,7 @@ export async function upsertRepoCachedTranslation(cacheKey: any, value: any) {
     await setLocalValue(README_LOCAL_STORAGE_KEYS.REPO_CACHE, entries);
 }
 
+/** 追加翻译记录 */
 export async function appendReadmeTranslationRecord(record: any) {
     if (!FeatureSet.readme_enable_token_record) return;
 

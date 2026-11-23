@@ -1,15 +1,13 @@
 /**
  * @file src/core/translation-shared.ts
- * 翻译结果判定与调试事件等跨 feature/provider 共享逻辑
- *
- * 这些函数原先定义在 features/markdown-translation，但 providers/dispatcher
- * 也需要使用；下沉到 core 以打断 provider ↔ feature 的循环依赖。
+ * 翻译结果判定与调试事件
  */
 
 import { README_CONFIG } from './constants';
 import { isObjectObjectArtifact, normalizeTranslationText, truncateText } from './utils';
 import { shouldSkipReadmeText } from './text-filter';
 
+/** 脱敏调试文本 */
 export function sanitizeReadmeDebugText(text: string): string {
     return truncateText(
         String(text || '')
@@ -32,6 +30,7 @@ export interface ReadmeDebugContext {
     events: Array<Record<string, unknown>>;
 }
 
+/** 记录调试事件 */
 export function addReadmeDebugEvent(
     context: ReadmeDebugContext | null | undefined,
     phase: string,
@@ -52,6 +51,7 @@ export function addReadmeDebugEvent(
     console.debug('[README翻译调试]', context.runId, event);
 }
 
+/** 判断译文是否可用 */
 export function isUsableTranslation(sourceText: string, translatedText: unknown): boolean {
     const translated = normalizeTranslationText(translatedText);
     return (

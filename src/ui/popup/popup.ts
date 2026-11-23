@@ -1,6 +1,4 @@
-'use strict';
-
-// UI 页面脚本大量直接操作 DOM 属性；把 DOM 边界放宽到 any，避免为每个查询结果重复标注元素类型。
+// UI 脚本直接操作 DOM
 const document: any = globalThis.document;
 const window: any = globalThis.window;
 
@@ -8,13 +6,15 @@ export const defaults = {
     enable_extension: true,
 };
 
-export const HOMEPAGE_URL = 'https://maydayv.github.io/github-chinese/';
-export const CHANGELOG_URL = `${HOMEPAGE_URL}#changelog`;
+export const HOMEPAGE_URL = 'https://github.com/yoyokity/github-translator';
+export const CHANGELOG_URL = `${HOMEPAGE_URL}/blob/main/CHANGELOG.md`;
 
+/** 按 id 取元素 */
 export function byId(id: any) {
     return document.getElementById(id);
 }
 
+/** 更新开关状态 */
 export function updateStateText(enabled: any) {
     const status = byId('status');
     if (!status) return;
@@ -24,6 +24,7 @@ export function updateStateText(enabled: any) {
     status.classList.toggle('is-off', !enabled);
 }
 
+/** 通知当前页刷新 */
 export async function refreshActiveGithubPage() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) return false;
@@ -36,17 +37,18 @@ export async function refreshActiveGithubPage() {
     }
 }
 
+/** 新标签打开链接 */
 export async function openTab(url: any) {
     await chrome.tabs.create({ url });
     window.close();
 }
 
+/** 清除更新提示 */
 export async function clearUpdateNotice() {
     await chrome.storage.local.remove('update_notice');
 }
 
-// 更新提示由 background 在版本更新后写入。打开 popup 即视为已看到，先摘掉角标；
-// 横幅本身留到用户点开更新日志或手动忽略为止。
+/** 初始化更新提示 */
 export async function initUpdateNotice() {
     const notice = byId('updateNotice');
     if (!notice) return;
@@ -71,6 +73,7 @@ export async function initUpdateNotice() {
     });
 }
 
+/** 初始化 popup */
 export async function init() {
     const settings = await chrome.storage.sync.get(defaults);
 

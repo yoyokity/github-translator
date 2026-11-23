@@ -1,16 +1,11 @@
 /**
  * @file src/features/markdown-translation.ts
- * README 与 About 描述翻译：DOM 任务提取、渐进式打字机渲染、调试上下文与还原
+ * README 与 About 描述翻译
  */
 
-import {
-    AI_CHAT_PROVIDERS,
-    FeatureSet,
-    README_CONFIG,
-    README_LOCAL_STORAGE_KEYS,
-    readmeRuntime,
-} from '../core/constants';
-import { state } from '../core/state';
+import { README_CONFIG, README_LOCAL_STORAGE_KEYS } from '../core/constants';
+import { AI_CHAT_PROVIDERS } from '../core/provider-protocol';
+import { FeatureSet, readmeRuntime, state } from '../core/state';
 import {
     appendReadmeTranslationRecord,
     buildRepoCacheKey,
@@ -36,12 +31,13 @@ import {
     isUsableTranslation,
     sanitizeReadmeDebugText,
 } from '../core/translation-shared';
-import { containsObjectObjectArtifact, createHash, normalizeTranslationText } from '../core/utils';
+import { isObjectObjectArtifact, createHash, normalizeTranslationText } from '../core/utils';
 import { mapWithConcurrency, translateTextsWithProvider } from '../providers/dispatcher';
 import { getProviderConfig } from '../providers/provider-config';
 
 export { addReadmeDebugEvent, isUsableTranslation, sanitizeReadmeDebugText };
 
+/** 是否仓库页 */
 export function isRepositoryPage() {
     return (
         (typeof state.pageConfig.currentPageType === 'string' &&
@@ -50,6 +46,7 @@ export function isRepositoryPage() {
     );
 }
 
+/** 是否 README 页 */
 export function isReadmePage() {
     const pageType = state.pageConfig.currentPageType;
     if (
@@ -60,15 +57,16 @@ export function isReadmePage() {
         return true;
     }
 
-    // GitHub Turbo/React 页面类型偶尔会短暂带有未知后缀；只要当前是仓库页
-    // 且实际存在 README 根节点，就继续处理，避免 About 能翻译而 README 被跳过。
+    // 有 README 根节点即视为可译
     return isRepositoryPage() && Boolean(getReadmeRootElement());
 }
 
+/** 是否启用 README 翻译 */
 export function isReadmeTranslationEnabled() {
     return FeatureSet.enable_extension && FeatureSet.enable_readme_translation && isReadmePage();
 }
 
+/** 是否启用 About 翻译 */
 export function isRepoAboutTranslationEnabled() {
     return (
         FeatureSet.enable_extension &&
@@ -77,11 +75,12 @@ export function isRepoAboutTranslationEnabled() {
     );
 }
 
+/** 获取 README 根节点 */
 export function getReadmeRootElement() {
     for (const selector of README_CONFIG.ROOT_SELECTORS) {
         const element = document.querySelector(selector);
         if (!element) continue;
-        // 避免在议题/PR 等页面误选普通 markdown 正文
+        // 排除讨论正文
         if (element.closest('.js-comment-body, [data-testid="markdown-body"], .comment-body')) {
             continue;
         }
@@ -92,8 +91,7 @@ export function getReadmeRootElement() {
     return null;
 }
 
-// 仓库侧栏 About 描述（兼容经典 UI、SidebarAbout CSS-module 和 BorderGrid 哈希类）。
-// 属仓库主自定义的自由文本，静态词库无法收录，故与 README 一样走 AI 内容翻译、就地替换。
+/** 获取 About 元素列表 */
 export function getRepoAboutElements() {
     const elements: any[] = [];
     README_CONFIG.ABOUT_SELECTORS.forEach((selector: any) => {
@@ -107,10 +105,12 @@ export function getRepoAboutElements() {
     return elements;
 }
 
+/** 获取首个 About 元素 */
 export function getRepoAboutElement() {
     return getRepoAboutElements()[0] || null;
 }
 
+/** 翻译 About 描述 */
 export async function translateRepoAboutDescription(
     debugContext: any = null,
     _reason: any = 'unknown',
@@ -157,6 +157,7 @@ export async function translateRepoAboutDescription(
     let totalTokens = 0;
 
     if (cacheKey) {
+        // 优先用缓存译文
         const cached = await getRepoCachedTranslation(cacheKey, { requireComplete: true }).catch(
             () => null,
         );
@@ -202,7 +203,7 @@ export async function translateRepoAboutDescription(
                     return translatedCount;
                 }
             } catch {
-                // JSON 解析失败则回退至常规翻译
+                // 解析失败走正常翻译
             }
         }
     }
@@ -263,6 +264,7 @@ export async function translateRepoAboutDescription(
     return translatedCount;
 }
 
+/** 获取 README 状态 */
 export function getReadmeElementState(readmeEl: any) {
     if (!readmeRuntime.stateByElement.has(readmeEl)) {
         readmeRuntime.stateByElement.set(readmeEl, {
@@ -276,6 +278,7 @@ export function getReadmeElementState(readmeEl: any) {
     return readmeRuntime.stateByElement.get(readmeEl);
 }
 
+/** 按数量分组 */
 export function buildProgressiveGroups(items: any, groupSize: any) {
     const values = Array.isArray(items) ? items : [];
     if (!values.length) return [];
@@ -290,14 +293,7 @@ export function buildProgressiveGroups(items: any, groupSize: any) {
     return groups;
 }
 
-export function getReadmeTaskBlock(readmeEl: any, task: any) {
-    const parent = task?.node?.parentElement;
-    if (!parent) return readmeEl;
-
-    const block = parent.closest(README_CONFIG.BLOCK_SELECTOR);
-    return block && readmeEl.contains(block) ? block : parent;
-}
-
+/** 获取通用任务块 */
 export function getTranslationTaskBlock(rootEl: any, task: any, blockSelector: any) {
     const parent = task?.node?.parentElement;
     if (!parent) return rootEl;
@@ -306,6 +302,7 @@ export function getTranslationTaskBlock(rootEl: any, task: any, blockSelector: a
     return block && rootEl.contains(block) ? block : parent;
 }
 
+/** 按块分组任务 */
 export function buildProgressiveTaskGroups(readmeEl: any, tasks: any, groupSize: any) {
     const blockMap = new Map();
     tasks.forEach((task: any) => {
@@ -321,6 +318,7 @@ export function buildProgressiveTaskGroups(readmeEl: any, tasks: any, groupSize:
     );
 }
 
+/** 按自定义块分组任务 */
 export function buildProgressiveTaskGroupsByBlock(
     rootEl: any,
     tasks: any,
@@ -341,6 +339,7 @@ export function buildProgressiveTaskGroupsByBlock(
     );
 }
 
+/** 创建调试上下文 */
 export function createReadmeDebugContext(reason: any) {
     if (!FeatureSet.readme_enable_debug) return null;
 
@@ -354,6 +353,7 @@ export function createReadmeDebugContext(reason: any) {
     };
 }
 
+/** 描述调试任务 */
 export function describeReadmeDebugTask(task: any, rootEl: any) {
     const node = task?.node;
     const parent = node?.parentElement;
@@ -376,6 +376,7 @@ export function describeReadmeDebugTask(task: any, rootEl: any) {
     };
 }
 
+/** 保存调试上下文 */
 export async function flushReadmeDebugContext(context: any, status: any, summary: any = {}) {
     if (!context) return;
 
@@ -405,11 +406,13 @@ export async function flushReadmeDebugContext(context: any, status: any, summary
     }
 }
 
+/** 进入 DOM 变更保护 */
 export function pushReadmeDomMutationGuard() {
     readmeRuntime.domMutationGuardDepth += 1;
     readmeRuntime.isApplyingTranslation = true;
 }
 
+/** 退出 DOM 变更保护 */
 export function popReadmeDomMutationGuard() {
     readmeRuntime.domMutationGuardDepth = Math.max(0, readmeRuntime.domMutationGuardDepth - 1);
     if (readmeRuntime.domMutationGuardDepth === 0) {
@@ -421,6 +424,7 @@ export function popReadmeDomMutationGuard() {
     }
 }
 
+/** 包裹 DOM 变更保护 */
 export function withReadmeDomMutationGuard(callback: any) {
     pushReadmeDomMutationGuard();
     try {
@@ -430,6 +434,7 @@ export function withReadmeDomMutationGuard(callback: any) {
     }
 }
 
+/** 刷新任务节点引用 */
 export function refreshReadmeTextTaskNodes(rootEl: any, tasks: any) {
     if (!rootEl || !tasks.length) return tasks;
 
@@ -460,10 +465,7 @@ export function refreshReadmeTextTaskNodes(rootEl: any, tasks: any) {
     return refreshed;
 }
 
-export function needsReadmeTranslation(text: any) {
-    return !shouldSkipReadmeText(text);
-}
-
+/** 按文本替换译文 */
 export function applyTextGroupTranslations(
     rootEl: any,
     tasksByText: any,
@@ -487,6 +489,7 @@ export function applyTextGroupTranslations(
     return translatedCount;
 }
 
+/** 用 HTML 替换子节点 */
 export function replaceElementChildrenFromHtml(element: any, html: any) {
     const parsed = new DOMParser().parseFromString(String(html || ''), 'text/html');
     const nodes = Array.from(parsed.body.childNodes, (node: any) =>
@@ -495,21 +498,14 @@ export function replaceElementChildrenFromHtml(element: any, html: any) {
     element.replaceChildren(...nodes);
 }
 
+/** 应用 README HTML */
 export function applyReadmeHtml(readmeEl: any, html: any) {
     return withReadmeDomMutationGuard(() => {
         replaceElementChildrenFromHtml(readmeEl, html);
     });
 }
 
-export function applyReadmeTextGroupTranslations(
-    rootEl: any,
-    tasksByText: any,
-    texts: any,
-    translatedMap: any,
-) {
-    return applyTextGroupTranslations(rootEl, tasksByText, texts, translatedMap);
-}
-
+/** 应用任务译文 */
 export function applyTaskTranslations(rootEl: any, tasks: any, translatedMap: any) {
     let translatedCount = 0;
 
@@ -525,30 +521,29 @@ export function applyTaskTranslations(rootEl: any, tasks: any, translatedMap: an
     return translatedCount;
 }
 
-export function applyReadmeTaskTranslations(rootEl: any, tasks: any, translatedMap: any) {
-    return applyTaskTranslations(rootEl, tasks, translatedMap);
-}
-
+/** 等待下一帧 */
 export async function waitForNextPaint() {
     await new Promise((resolve: any) => {
         window.requestAnimationFrame(() => resolve());
     });
 }
 
+/** 还原 README 原文 */
 export function restoreReadmeTranslation() {
     const readmeEl = getReadmeRootElement();
     if (!readmeEl) return;
 
-    const state = getReadmeElementState(readmeEl);
-    if (state.originalHtml && readmeEl.innerHTML !== state.originalHtml) {
-        applyReadmeHtml(readmeEl, state.originalHtml);
+    const readmeState = getReadmeElementState(readmeEl);
+    if (readmeState.originalHtml && readmeEl.innerHTML !== readmeState.originalHtml) {
+        applyReadmeHtml(readmeEl, readmeState.originalHtml);
     }
 
-    state.translatedHash = '';
-    state.translatedTextHash = '';
-    state.translatedSignature = '';
+    readmeState.translatedHash = '';
+    readmeState.translatedTextHash = '';
+    readmeState.translatedSignature = '';
 }
 
+/** 调度 README 翻译 */
 export function scheduleReadmeTranslation(reason: any) {
     if (!FeatureSet.enable_extension) return;
 
@@ -570,6 +565,7 @@ export function scheduleReadmeTranslation(reason: any) {
     }, README_CONFIG.DEBOUNCE_MS);
 }
 
+/** 执行 README 翻译 */
 export async function runReadmeTranslation(reason: any) {
     const shouldTranslateReadme = isReadmeTranslationEnabled();
     const shouldTranslateAbout = isRepoAboutTranslationEnabled();
@@ -596,7 +592,7 @@ export async function runReadmeTranslation(reason: any) {
             readmeEnabled: shouldTranslateReadme,
             aboutEnabled: shouldTranslateAbout,
         });
-        // About 与 README 没有内容依赖，分别发起翻译请求；任一请求失败只告警，不影响另一部分。
+        // About 与 README 并行翻译
         const translationTasks: any[] = [];
         if (shouldTranslateAbout) {
             translationTasks.push(
@@ -654,27 +650,28 @@ export async function runReadmeTranslation(reason: any) {
     }
 }
 
+/** 翻译 README 元素 */
 export async function translateReadmeElement(readmeEl: any, reason: any, debugContext: any = null) {
     const startAt = performance.now();
     const expectedHref = window.location.href;
-    const state = getReadmeElementState(readmeEl);
+    const readmeState = getReadmeElementState(readmeEl);
     const currentHash = createHash(readmeEl.innerHTML);
     const currentTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
 
-    if (state.translatedHash && currentHash !== state.translatedHash) {
-        if (state.translatedTextHash && currentTextHash === state.translatedTextHash) {
-            // GitHub/React 只重建了等价 HTML（属性、节点包装或空白变化），保留翻译基线，
-            // 避免把稳定的本地翻译误判成新内容并再次请求接口。
-            state.translatedHash = currentHash;
+    // 检测内容是否变化
+    if (readmeState.translatedHash && currentHash !== readmeState.translatedHash) {
+        if (readmeState.translatedTextHash && currentTextHash === readmeState.translatedTextHash) {
+            // 仅 HTML 外壳变化
+            readmeState.translatedHash = currentHash;
         } else {
-            // README 被重新渲染为新的文本内容时，才重置翻译状态。
-            state.originalHtml = readmeEl.innerHTML;
-            state.translatedHash = '';
-            state.translatedTextHash = '';
-            state.translatedSignature = '';
+            // 文本变化则重置
+            readmeState.originalHtml = readmeEl.innerHTML;
+            readmeState.translatedHash = '';
+            readmeState.translatedTextHash = '';
+            readmeState.translatedSignature = '';
         }
-    } else if (!state.originalHtml) {
-        state.originalHtml = readmeEl.innerHTML;
+    } else if (!readmeState.originalHtml) {
+        readmeState.originalHtml = readmeEl.innerHTML;
     }
 
     const providerConfig = getProviderConfig();
@@ -685,37 +682,39 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
     }
 
     const repoInfo = getCurrentRepoInfo();
-    // 只根据 README 的可见文本生成内容指纹，忽略 GitHub React 动态属性和节点包装变化。
-    // 这样刷新/软导航时可以命中本地仓库缓存，不会因 HTML 外壳变化重复调用接口。
-    const sourceHash = getStableReadmeTextHash(state.originalHtml);
+    // 以可见文本生成稳定指纹
+    const sourceHash = getStableReadmeTextHash(readmeState.originalHtml);
     const signature = createHash(`${providerConfig.signature}\n${sourceHash}`);
     addReadmeDebugEvent(debugContext, 'readme_start', {
         reason: reason || 'unknown',
         sourceHash,
-        htmlLength: state.originalHtml.length,
+        htmlLength: readmeState.originalHtml.length,
     });
-    if (state.translatedSignature === signature && currentHash === state.translatedHash) {
+    if (
+        readmeState.translatedSignature === signature &&
+        currentHash === readmeState.translatedHash
+    ) {
         addReadmeDebugEvent(debugContext, 'readme_skipped', { reason: 'already_translated' });
         return;
     }
 
     const sourceText = normalizeText(readmeEl.textContent || '');
     if (shouldSkipReadmeByLanguage(sourceText, providerConfig.targetLang)) {
-        if (readmeEl.innerHTML !== state.originalHtml) {
-            applyReadmeHtml(readmeEl, state.originalHtml);
+        if (readmeEl.innerHTML !== readmeState.originalHtml) {
+            applyReadmeHtml(readmeEl, readmeState.originalHtml);
         }
 
-        state.translatedSignature = signature;
-        state.translatedHash = createHash(readmeEl.innerHTML);
-        state.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
+        readmeState.translatedSignature = signature;
+        readmeState.translatedHash = createHash(readmeEl.innerHTML);
+        readmeState.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
         return;
     }
 
     const repoCacheKey = buildRepoCacheKey(repoInfo, sourceHash, providerConfig.signature);
-    // 兼容 2.5.9 之前按原始 HTML 建立的缓存；命中后会在下方迁移为稳定文本指纹。
+    // 兼容旧版缓存键
     const legacyRepoCacheKey = buildRepoCacheKey(
         repoInfo,
-        createHash(state.originalHtml),
+        createHash(readmeState.originalHtml),
         providerConfig.signature,
     );
     let cacheKeyUsed = repoCacheKey;
@@ -733,18 +732,19 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
 
     let partialCacheApplied = false;
     if (cacheHit?.translatedHtml) {
-        if (containsObjectObjectArtifact(cacheHit.translatedHtml)) {
+        if (isObjectObjectArtifact(cacheHit.translatedHtml)) {
             console.warn('[README翻译] 忽略含有 [object Object] 的损坏仓库缓存');
         } else {
+            // 应用缓存并检查剩余
             applyReadmeHtml(readmeEl, cacheHit.translatedHtml);
             const cachedRemaining = collectReadmeUntranslatedTasks(
                 readmeEl,
-                state.originalHtml,
+                readmeState.originalHtml,
             ).filter((task: any) => task.node?.isConnected);
             if (!cachedRemaining.length) {
-                state.translatedSignature = signature;
-                state.translatedHash = createHash(readmeEl.innerHTML);
-                state.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
+                readmeState.translatedSignature = signature;
+                readmeState.translatedHash = createHash(readmeEl.innerHTML);
+                readmeState.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
 
                 await appendReadmeTranslationRecord({
                     sourceType: 'readme',
@@ -787,18 +787,18 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
         }
     }
 
-    // 这三个计数在 finally 之后写翻译记录时仍要用，必须声明在 try 块外的函数作用域。
     let translatedCount = 0;
     let totalTokens = 0;
     let retryMissedCount = 0;
 
     pushReadmeDomMutationGuard();
     try {
-        if (!partialCacheApplied && readmeEl.innerHTML !== state.originalHtml) {
-            applyReadmeHtml(readmeEl, state.originalHtml);
+        if (!partialCacheApplied && readmeEl.innerHTML !== readmeState.originalHtml) {
+            applyReadmeHtml(readmeEl, readmeState.originalHtml);
         }
 
         const runTranslationPass = async (passName: any) => {
+            // 收集可译任务
             const tasks = collectReadmeTextTasks(readmeEl)
                 .filter((task: any) => !isLikelyOpaqueReadmeLabel(task.normalizedText, task.node))
                 .filter(
@@ -828,6 +828,7 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
             let passTokens = 0;
 
             if (FeatureSet.readme_enable_progressive) {
+                // 渐进分批翻译
                 const usesAiBatchLimits =
                     AI_CHAT_PROVIDERS.includes(providerConfig.provider || '') ||
                     providerConfig.provider === 'qwen_mt';
@@ -850,12 +851,12 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
                                 debugBatchIndex: index,
                             });
 
-                        // 软导航防重入校验：若网络请求期间用户已跳转或节点已卸载，安全放弃本次 DOM 回填
+                        // 路由变化则放弃回填
                         if (!readmeEl.isConnected || window.location.href !== expectedHref) {
                             return { applied: 0, tokens: groupTokens };
                         }
 
-                        const applied = applyReadmeTaskTranslations(readmeEl, group, translatedMap);
+                        const applied = applyTaskTranslations(readmeEl, group, translatedMap);
                         addReadmeDebugEvent(debugContext, 'group_applied', {
                             pass: passName,
                             batch: index,
@@ -872,6 +873,7 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
                     passTranslatedCount += applied;
                 });
             } else {
+                // 一次性批量翻译
                 const { translatedMap, totalTokens: tokens } = await translateTextsWithProvider(
                     uniqueTexts,
                     providerConfig,
@@ -883,7 +885,7 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
                     return { translatedCount: 0, totalTokens: passTokens };
                 }
 
-                passTranslatedCount += applyReadmeTextGroupTranslations(
+                passTranslatedCount += applyTextGroupTranslations(
                     readmeEl,
                     tasksByText,
                     uniqueTexts,
@@ -907,15 +909,14 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
             return;
         }
 
-        // 补翻译：首轮后仍有未翻句子（渐进翻译期间 DOM 被 React 重渲染、或个别条目内容降级为原文），
-        // 逐条重试收尾。以“无进展即停止 + 最多 maxRetryPasses 轮”双重保险避免空转。
+        // 剩余条目逐条重试
         const maxRetryPasses = 2;
         for (let attempt = 0; attempt < maxRetryPasses; attempt += 1) {
             if (!readmeEl.isConnected || window.location.href !== expectedHref) break;
 
             const remainingTasks = collectReadmeUntranslatedTasks(
                 readmeEl,
-                state.originalHtml,
+                readmeState.originalHtml,
             ).filter((task: any) => task.node?.isConnected);
             addReadmeDebugEvent(debugContext, 'retry_scan', {
                 attempt,
@@ -945,7 +946,7 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
 
             if (!readmeEl.isConnected || window.location.href !== expectedHref) break;
 
-            const applied = applyReadmeTextGroupTranslations(
+            const applied = applyTextGroupTranslations(
                 readmeEl,
                 retryTasksByText,
                 retryTexts,
@@ -965,15 +966,16 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
             return;
         }
 
+        // 无需翻译则标记完成
         if (
             !translatedCount &&
-            !collectReadmeUntranslatedTasks(readmeEl, state.originalHtml).some(
+            !collectReadmeUntranslatedTasks(readmeEl, readmeState.originalHtml).some(
                 (task: any) => task.node?.isConnected,
             )
         ) {
-            state.translatedSignature = signature;
-            state.translatedHash = createHash(readmeEl.innerHTML);
-            state.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
+            readmeState.translatedSignature = signature;
+            readmeState.translatedHash = createHash(readmeEl.innerHTML);
+            readmeState.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
             return;
         }
     } finally {
@@ -984,9 +986,10 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
         return;
     }
 
-    const remainingTasks = collectReadmeUntranslatedTasks(readmeEl, state.originalHtml).filter(
-        (task: any) => task.node?.isConnected,
-    );
+    const remainingTasks = collectReadmeUntranslatedTasks(
+        readmeEl,
+        readmeState.originalHtml,
+    ).filter((task: any) => task.node?.isConnected);
     const stillMissed = remainingTasks.length;
     addReadmeDebugEvent(debugContext, 'readme_end', {
         status: stillMissed ? 'partial' : 'success',
@@ -998,14 +1001,14 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
             .map((task: any) => describeReadmeDebugTask(task, readmeEl)),
     });
     if (!stillMissed) {
-        state.translatedSignature = signature;
-        state.translatedHash = createHash(readmeEl.innerHTML);
-        state.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
+        readmeState.translatedSignature = signature;
+        readmeState.translatedHash = createHash(readmeEl.innerHTML);
+        readmeState.translatedTextHash = getStableReadmeTextHash(readmeEl.innerHTML);
     } else {
-        // 部分结果也要持久化；刷新时先恢复已成功节点，再只补翻译剩余节点。
-        state.translatedSignature = '';
-        state.translatedHash = '';
-        state.translatedTextHash = '';
+        // 部分完成也保留缓存
+        readmeState.translatedSignature = '';
+        readmeState.translatedHash = '';
+        readmeState.translatedTextHash = '';
     }
 
     if (!stillMissed || translatedCount > 0 || partialCacheApplied) {
@@ -1031,6 +1034,7 @@ export async function translateReadmeElement(readmeEl: any, reason: any, debugCo
     });
 }
 
+/** 警告 README 配置 */
 export function warnReadmeConfig(message: any) {
     const warnKey = `${FeatureSet.readme_provider}:${message}`;
     if (readmeRuntime.lastWarnKey === warnKey) return;
@@ -1039,6 +1043,7 @@ export function warnReadmeConfig(message: any) {
     console.warn(`[README翻译] ${message}`);
 }
 
+/** 收集 README 文本任务 */
 export function collectReadmeTextTasks(readmeEl: any) {
     const tasks: any[] = [];
     const walker = document.createTreeWalker(readmeEl, NodeFilter.SHOW_TEXT);
@@ -1061,6 +1066,7 @@ export function collectReadmeTextTasks(readmeEl: any) {
     return tasks;
 }
 
+/** 统计原文文本次数 */
 export function collectReadmeOriginalTextCounts(originalHtml: any) {
     const container = document.createElement('div');
     container.innerHTML = String(originalHtml || '');
@@ -1073,6 +1079,7 @@ export function collectReadmeOriginalTextCounts(originalHtml: any) {
     return counts;
 }
 
+/** 收集未翻译任务 */
 export function collectReadmeUntranslatedTasks(readmeEl: any, originalHtml: any) {
     const originalCounts = collectReadmeOriginalTextCounts(originalHtml);
     return collectReadmeTextTasks(readmeEl).filter((task: any) => {

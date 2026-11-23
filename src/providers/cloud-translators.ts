@@ -1,31 +1,25 @@
 /**
  * @file src/providers/cloud-translators.ts
- * 云端翻译器协议适配：DeepL、Google、Azure、通义千问 Qwen-MT 与 OpenAI 兼容协议
+ * 各云端翻译协议适配
  */
 
-import { OPENAI_README_SYSTEM_PROMPT } from '../core/constants';
+import { OPENAI_README_SYSTEM_PROMPT } from '../core/prompts';
+import { getReadmeUsageTokens } from '../core/storage-cache';
 import {
-    getReadmeUsageTokens,
-    isExtensionContextInvalidatedError,
-    normalizeRuntimeErrorMessage,
-} from '../core/storage-cache';
+    applyOpenAiCompatibleRequestOptions,
+    buildOpenAiCompatibleHeaders,
+    mapTargetLangForAzure,
+    mapTargetLangForDeepL,
+} from '../core/provider-protocol';
+import { proxyFetchJson } from '../core/proxy-fetch';
 import {
     decodeHtmlEntities,
     isObjectObjectArtifact,
     normalizeTranslationText,
-    truncateText,
 } from '../core/utils';
-import {
-    getProviderHost,
-    isDeepSeekEndpoint,
-    isQwenEndpoint,
-    mapTargetLangForAzure,
-    mapTargetLangForDeepL,
-} from './provider-config';
 import { createRecoverableTranslationError } from './shared';
 
-export let openCodeSessionId = '';
-
+/** DeepL 翻译 */
 export async function translateWithDeepL(texts: any, providerConfig: any) {
     const data = await proxyFetchJson({
         url: providerConfig.url,
@@ -48,6 +42,7 @@ export async function translateWithDeepL(texts: any, providerConfig: any) {
     };
 }
 
+/** Google 翻译 */
 export async function translateWithGoogle(texts: any, providerConfig: any) {
     const url = new URL(providerConfig.url);
     url.searchParams.set('key', providerConfig.key);
@@ -71,6 +66,7 @@ export async function translateWithGoogle(texts: any, providerConfig: any) {
     };
 }
 
+/** Azure 翻译 */
 export async function translateWithAzure(texts: any, providerConfig: any) {
     const url = new URL(providerConfig.url);
     url.searchParams.set('api-version', '3.0');
@@ -100,6 +96,7 @@ export async function translateWithAzure(texts: any, providerConfig: any) {
     };
 }
 
+/** Qwen-MT 翻译 */
 export async function translateWithQwenMt(texts: any, providerConfig: any) {
     const translations: any[] = [];
     let tokens = 0;
@@ -132,6 +129,7 @@ export async function translateWithQwenMt(texts: any, providerConfig: any) {
     return { translations, tokens };
 }
 
+/** OpenAI 兼容翻译 */
 export async function translateWithOpenAiCompatible(texts: any, providerConfig: any) {
     const targetLanguage = '简体中文';
 
@@ -170,6 +168,7 @@ export async function translateWithOpenAiCompatible(texts: any, providerConfig: 
     };
 }
 
+/** 提取回复文本 */
 export function extractChatMessageContent(messageOrChoice: any) {
     const firstChoice = messageOrChoice?.message ? messageOrChoice : { message: messageOrChoice };
     const content =
@@ -177,6 +176,7 @@ export function extractChatMessageContent(messageOrChoice: any) {
     return normalizeTranslationText(content);
 }
 
+/** 解析 JSON 数组译文 */
 export function parseOpenAiArray(rawText: any, expectedLength: any) {
     let text = normalizeTranslationText(rawText);
     text = stripOpenAiReasoningBlocks(text);
@@ -202,6 +202,7 @@ export function parseOpenAiArray(rawText: any, expectedLength: any) {
         throw createRecoverableTranslationError('OpenAI 兼容接口返回内容不是合法 JSON 数组。');
     }
 
+    // 兼容常见包装字段
     if (!Array.isArray(parsed) && parsed && typeof parsed === 'object') {
         if (Array.isArray(parsed.translations)) parsed = parsed.translations;
         else if (Array.isArray(parsed.data)) parsed = parsed.data;
@@ -233,147 +234,9 @@ export function parseOpenAiArray(rawText: any, expectedLength: any) {
     });
 }
 
+/** 移除思考块 */
 export function stripOpenAiReasoningBlocks(text: any) {
     return String(text || '')
         .replace(/<think>[\s\S]*?<\/think>/gi, '')
         .trim();
-}
-
-export function sendProxyMessageOnce(request: any) {
-    return new Promise((resolve: any, reject: any) => {
-        try {
-            if (!chrome?.runtime?.id) {
-                reject(
-                    new Error(
-                        normalizeRuntimeErrorMessage(new Error('Extension context invalidated.')),
-                    ),
-                );
-                return;
-            }
-
-            chrome.runtime.sendMessage(
-                {
-                    type: 'ghcn-proxy-fetch',
-                    payload: request,
-                },
-                (message: any) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(normalizeRuntimeErrorMessage(chrome.runtime.lastError)));
-                        return;
-                    }
-
-                    resolve(message);
-                },
-            );
-        } catch (err: any) {
-            reject(new Error(normalizeRuntimeErrorMessage(err)));
-        }
-    });
-}
-
-export async function proxyFetchJson(request: any) {
-    // MV3 后台 service worker 可能处于空闲/重启中，首个消息偶发
-    // “Could not establish connection / message channel closed”，短暂退避后重试。
-    // 注意：仅对“消息未送达后台”的瞬时失败重试；上下文失效需刷新页面，不重试。
-    const maxAttempts = 3;
-    let response: any;
-    for (let attempt = 1; ; attempt += 1) {
-        try {
-            response = await sendProxyMessageOnce(request);
-            break;
-        } catch (error: any) {
-            if (isExtensionContextInvalidatedError(error) || attempt >= maxAttempts) {
-                throw error;
-            }
-            await new Promise((resolve: any) => window.setTimeout(() => resolve(), 150 * attempt));
-        }
-    }
-
-    if (!response) {
-        throw new Error('翻译请求失败：后台未返回响应。');
-    }
-
-    const { ok, status, statusText, body, error } = response;
-    if (!ok) {
-        const details = body ? truncateText(body, 200) : error || 'unknown error';
-        throw new Error(`翻译请求失败 (${status} ${statusText}): ${details}`);
-    }
-
-    if (!body) return null;
-
-    try {
-        return JSON.parse(body);
-    } catch {
-        throw new Error(`接口返回非 JSON 数据: ${truncateText(body, 180)}`);
-    }
-}
-
-export function isMiniMaxEndpoint(url: any) {
-    const host = getProviderHost(url);
-    return host === 'api.minimaxi.com' || host === 'api.minimax.io';
-}
-
-export function isKimiEndpoint(url: any) {
-    return getProviderHost(url) === 'api.moonshot.ai';
-}
-
-export function isZhipuEndpoint(url: any) {
-    return getProviderHost(url) === 'open.bigmodel.cn';
-}
-
-export function applyOpenAiCompatibleRequestOptions(payload: any, providerConfig: any) {
-    if (!payload) return payload;
-
-    if (isDeepSeekEndpoint(providerConfig?.url) || isKimiEndpoint(providerConfig?.url)) {
-        payload.stream = false;
-        payload.thinking = { type: 'disabled' };
-    } else if (isQwenEndpoint(providerConfig?.url)) {
-        payload.stream = false;
-        payload.enable_thinking = false;
-    } else if (isMiniMaxEndpoint(providerConfig?.url)) {
-        payload.stream = false;
-        payload.reasoning_split = true;
-    } else if (isZhipuEndpoint(providerConfig?.url)) {
-        payload.stream = false;
-        payload.thinking = { type: 'disabled' };
-        payload.do_sample = false;
-    }
-    return payload;
-}
-
-export function isOpenCodeEndpoint(url: any) {
-    const host = getProviderHost(url);
-    return host === 'opencode.ai' || host.endsWith('.opencode.ai');
-}
-
-// OpenCode Go 网关要求每个请求携带稳定的 x-opencode-session 才能完成路由，
-// 缺失时直接返回 400 MissingSessionID。这里按页面生命周期复用同一个会话 ID，
-// 保证同一篇 README 的多次分批请求命中同一会话的提示缓存。
-export function getOpenCodeSessionId() {
-    if (!openCodeSessionId) {
-        openCodeSessionId = createOpenCodeSessionId();
-    }
-    return openCodeSessionId;
-}
-
-export function createOpenCodeSessionId() {
-    try {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-            return crypto.randomUUID();
-        }
-    } catch {
-        // 回退到时间戳 + 随机串
-    }
-    return `ghcn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-export function buildOpenAiCompatibleHeaders(providerConfig: any) {
-    const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${providerConfig.key}`,
-    };
-    if (isOpenCodeEndpoint(providerConfig?.url)) {
-        headers['x-opencode-session'] = getOpenCodeSessionId();
-    }
-    return headers;
 }
