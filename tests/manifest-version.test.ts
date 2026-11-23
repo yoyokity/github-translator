@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
-import { buildManifest, deepMerge } from '../script/manifest.mjs';
+import { buildManifest, deepMerge } from '../script/manifest';
 
 const ROOT = process.cwd();
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));

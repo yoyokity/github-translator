@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * @file script/build.mjs
+ * @file script/build.ts
  * 单源码构建：Vite 打包 5 个固定文件名入口，再组装 chrome / edge / firefox 三端产物
  */
 
@@ -9,14 +9,38 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import { build } from 'vite';
-import { buildManifest } from './manifest.mjs';
+import { buildManifest } from './manifest';
+
+interface BuildEntry {
+    input: string;
+    output: string;
+    name: string;
+}
+
+interface BuildTarget {
+    name: string;
+    manifest: string;
+}
+
+interface PackageJson {
+    version: string;
+}
+
+interface BuiltManifest {
+    icons?: Record<string, string>;
+    version?: string;
+    background?: {
+        service_worker?: string;
+        scripts?: string[];
+    };
+}
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 const STAGING = path.join(DIST, '.staging');
-const PACKAGE = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+const PACKAGE = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as PackageJson;
 
-const ENTRIES = [
+const ENTRIES: BuildEntry[] = [
     { input: 'src/content.ts', output: 'content.js', name: 'GithubTranslatorContent' },
     { input: 'src/locals/entry.ts', output: 'locals.js', name: 'GithubTranslatorLocals' },
     { input: 'src/background.ts', output: 'background.js', name: 'GithubTranslatorBackground' },
@@ -28,7 +52,7 @@ const ENTRIES = [
     },
 ];
 
-const TARGETS = [
+const TARGETS: BuildTarget[] = [
     { name: 'chrome', manifest: 'chrome' },
     { name: 'edge', manifest: 'edge' },
     { name: 'firefox', manifest: 'firefox' },
@@ -37,12 +61,12 @@ const TARGETS = [
 const JS_OUTPUTS = ENTRIES.map((entry) => entry.output);
 const ICONS = ['icon16.png', 'icon32.png', 'icon48.png', 'icon128.png', 'icon512.png'];
 
-async function clean() {
+async function clean(): Promise<void> {
     await fsp.rm(DIST, { recursive: true, force: true });
     await fsp.mkdir(STAGING, { recursive: true });
 }
 
-async function bundle() {
+async function bundle(): Promise<void> {
     for (const entry of ENTRIES) {
         console.log(`[build] Bundling ${entry.input} -> ${entry.output}`);
         await build({
@@ -72,7 +96,11 @@ async function bundle() {
     }
 }
 
-async function copyFile(relativeSource, targetDir, relativeTarget = relativeSource) {
+async function copyFile(
+    relativeSource: string,
+    targetDir: string,
+    relativeTarget: string = relativeSource,
+): Promise<void> {
     const destination = path.join(targetDir, relativeTarget);
     const source = path.isAbsolute(relativeSource)
         ? relativeSource
@@ -81,7 +109,7 @@ async function copyFile(relativeSource, targetDir, relativeTarget = relativeSour
     await fsp.copyFile(source, destination);
 }
 
-async function assembleTarget(target) {
+async function assembleTarget(target: BuildTarget): Promise<void> {
     const targetDir = path.join(DIST, target.name);
     await fsp.mkdir(targetDir, { recursive: true });
 
@@ -111,7 +139,7 @@ async function assembleTarget(target) {
     );
 }
 
-function validateJavaScript(targetDir) {
+function validateJavaScript(targetDir: string): void {
     for (const output of JS_OUTPUTS) {
         const file = path.join(targetDir, output);
         const code = fs.readFileSync(file, 'utf8');
@@ -123,9 +151,11 @@ function validateJavaScript(targetDir) {
     }
 }
 
-async function validateTarget(target) {
+async function validateTarget(target: BuildTarget): Promise<void> {
     const targetDir = path.join(DIST, target.name);
-    const manifest = JSON.parse(fs.readFileSync(path.join(targetDir, 'manifest.json'), 'utf8'));
+    const manifest = JSON.parse(
+        fs.readFileSync(path.join(targetDir, 'manifest.json'), 'utf8'),
+    ) as BuiltManifest;
 
     const required = new Set([
         'manifest.json',
@@ -158,7 +188,7 @@ async function validateTarget(target) {
     validateJavaScript(targetDir);
 }
 
-async function validateConsistency() {
+async function validateConsistency(): Promise<void> {
     const reference = path.join(DIST, TARGETS[0].name);
     for (const output of JS_OUTPUTS) {
         const referenceBytes = fs.readFileSync(path.join(reference, output));
@@ -171,12 +201,12 @@ async function validateConsistency() {
     }
 }
 
-function report() {
+function report(): void {
     console.log('\n[build] Output:');
     for (const target of TARGETS) {
         const targetDir = path.join(DIST, target.name);
         let total = 0;
-        const walk = (dir) => {
+        const walk = (dir: string): void => {
             for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
                 const full = path.join(dir, entry.name);
                 if (entry.isDirectory()) walk(full);
@@ -188,7 +218,7 @@ function report() {
     }
 }
 
-async function main() {
+async function main(): Promise<void> {
     console.log(`[build] github-translator v${PACKAGE.version}`);
     await clean();
     await bundle();
@@ -205,7 +235,7 @@ async function main() {
     console.log('[build] Done.');
 }
 
-main().catch((error) => {
-    console.error('[build] FAILED:', error?.stack || error);
+main().catch((error: unknown) => {
+    console.error('[build] FAILED:', error instanceof Error ? error.stack : String(error));
     process.exit(1);
 });

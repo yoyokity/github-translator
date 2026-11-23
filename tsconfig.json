@@ -13,6 +13,6 @@
         "resolveJsonModule": true,
         "forceConsistentCasingInFileNames": true
     },
-    "include": ["src/**/*.ts", "tests/**/*.ts", "vite.config.ts"],
+    "include": ["src/**/*.ts", "tests/**/*.ts", "script/**/*.ts", "vite.config.ts"],
     "exclude": ["dist", "node_modules"]
 }

@@ -4,7 +4,7 @@ export default defineConfig({
     run: {
         tasks: {
             build: {
-                command: 'vpx script/build.mjs',
+                command: 'vpx script/build.ts',
                 cache: false,
             },
             test: {

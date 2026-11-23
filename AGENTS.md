@@ -24,8 +24,8 @@ src/                    唯一源码目录
 ├── manifests/          base / chromium / firefox 模板
 ├── assets/icons/       三端共用图标
 └── types/              i18n 与全局类型声明
-script/build.mjs        多入口构建 + 三端组装 + 产物校验
-script/manifest.mjs     manifest 深合并与版本注入
+script/build.ts        多入口构建 + 三端组装 + 产物校验
+script/manifest.ts     manifest 深合并与版本注入
 tests/                  Vitest 测试
 .vscode/tasks.json      VS Code 中文任务（调用 vp run）
 vite.config.ts          Vite+ run tasks / test / lint / fmt 配置
@@ -41,10 +41,10 @@ vp run build
 ```
 
 - 构建 / 测试 / 检查 / 格式化 / Lint 全部定义在 `vite.config.ts` 的 `run.tasks` 中，`package.json` 不再维护同名 scripts；统一用 `vp run <task>`。
-- `vp run build` 执行 `script/build.mjs`：用 Vite 的 `build()` API 依次打包 5 个固定文件名入口到临时目录，再组装 `dist/chrome`、`dist/edge`、`dist/firefox`。
+- `vp run build` 执行 `script/build.ts`：用 Vite 的 `build()` API 依次打包 5 个固定文件名入口到临时目录，再组装 `dist/chrome`、`dist/edge`、`dist/firefox`。
 - 产物文件名、目录与加载顺序被 manifest / HTML 固定引用，**禁止加 hash 或改路径**。
 - `dist/` 不提交，禁止手改；修改源码后重新构建。
-- 新增构建入口时必须登记到 `script/build.mjs` 的 `ENTRIES`；普通模块由 import 图自动打包。
+- 新增构建入口时必须登记到 `script/build.ts` 的 `ENTRIES`；普通模块由 import 图自动打包。
 - manifest 共享字段放 `src/manifests/base.json`，端差异放 `chromium.json` / `firefox.json`；版本号由构建从 `package.json` 注入。
 - `vp build` 只是 Vite 单次构建，不负责三端组装；统一用 `vp run build`。
 - `.vscode/tasks.json` 提供与上述任务一一对应的中文标签任务。
