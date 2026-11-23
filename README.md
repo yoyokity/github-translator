@@ -128,15 +128,6 @@
 1. Firefox 在 `about:debugging#/runtime/this-firefox` 中临时载入 `firefox/manifest.json`
 1. 修改对应浏览器目录下的 `locals.js` 后，在扩展管理页点击刷新按钮即可生效
 
-发版时在更新下方「更新日志」后执行以下命令，把内容同步到官网 `index.html` 并自检：
-
-```bash
-node script/build-changelog.js
-node script/test-update-entry.js
-```
-
-官网更新日志板块由 README 生成，请勿直接编辑 `index.html` 中 `<!-- CHANGELOG:START -->` 与 `<!-- CHANGELOG:END -->` 之间的内容。
-
 ## 🔄 更新日志
 
 ### v3.1.4 (2026-11-17)
