@@ -41,7 +41,8 @@ function assemble() {
     }
     let code = fs.readFileSync(modPath, 'utf8');
     // Strip module header docblock if present
-    code = code.replace(/^\/\*\*[\s\S]*?\*\/\n\n?/, '').trimEnd();
+    // 同时兼容 CRLF 工作区，避免 Windows 下未能剥离注释块导致构建产物漂移
+    code = code.replace(/^\/\*\*[\s\S]*?\*\/\r?\n\r?\n?/, '').trimEnd();
 
     parts.push(`    // ==========================================================================\n    // [Module] ${rel}\n    // ==========================================================================\n\n`);
     parts.push(code + '\n\n');

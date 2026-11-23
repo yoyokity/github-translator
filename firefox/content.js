@@ -2015,6 +2015,8 @@
     // [Module] providers/cloud-translators.js
     // ==========================================================================
 
+    let openCodeSessionId = '';
+
     async function translateWithDeepL(texts, providerConfig) {
         const data = await proxyFetchJson({
             url: providerConfig.url,
@@ -2140,10 +2142,7 @@
         const data = await proxyFetchJson({
             url: providerConfig.url,
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${providerConfig.key}`,
-            },
+            headers: buildOpenAiCompatibleHeaders(providerConfig),
             body: JSON.stringify(payload),
         });
 
@@ -2308,6 +2307,43 @@
             payload.do_sample = false;
         }
         return payload;
+    }
+
+    function isOpenCodeEndpoint(url) {
+        const host = getProviderHost(url);
+        return host === 'opencode.ai' || host.endsWith('.opencode.ai');
+    }
+
+    // OpenCode Go 网关要求每个请求携带稳定的 x-opencode-session 才能完成路由，
+    // 缺失时直接返回 400 MissingSessionID。这里按页面生命周期复用同一个会话 ID，
+    // 保证同一篇 README 的多次分批请求命中同一会话的提示缓存。
+    function getOpenCodeSessionId() {
+        if (!openCodeSessionId) {
+            openCodeSessionId = createOpenCodeSessionId();
+        }
+        return openCodeSessionId;
+    }
+
+    function createOpenCodeSessionId() {
+        try {
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+        } catch {
+            // 回退到时间戳 + 随机串
+        }
+        return `ghcn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    function buildOpenAiCompatibleHeaders(providerConfig) {
+        const headers = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${providerConfig.key}`,
+        };
+        if (isOpenCodeEndpoint(providerConfig?.url)) {
+            headers['x-opencode-session'] = getOpenCodeSessionId();
+        }
+        return headers;
     }
 
     // ==========================================================================

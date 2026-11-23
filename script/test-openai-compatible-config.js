@@ -157,6 +157,33 @@ assert.equal(
   'https://example.com/custom/base/chat/completions',
 );
 
+assert.equal(
+  context.normalizeOpenAiEndpoint('https://opencode.ai/inference/go'),
+  'https://opencode.ai/inference/go/chat/completions',
+);
+
+const openCodeConfig = {
+  url: 'https://opencode.ai/inference/go/chat/completions',
+  key: 'test-key',
+};
+
+const openCodeHeaders = context.buildOpenAiCompatibleHeaders(openCodeConfig);
+assert.equal(openCodeHeaders.Authorization, 'Bearer test-key');
+assert.equal(openCodeHeaders['x-opencode-session'], 'test-uuid');
+
+// 同一会话内复用同一个会话 ID，便于网关路由与提示缓存命中
+assert.equal(
+  context.buildOpenAiCompatibleHeaders(openCodeConfig)['x-opencode-session'],
+  'test-uuid',
+);
+
+const nonOpenCodeHeaders = context.buildOpenAiCompatibleHeaders({
+  url: 'https://api.openai.com/v1/chat/completions',
+  key: 'test-key',
+});
+assert.equal(nonOpenCodeHeaders['x-opencode-session'], undefined);
+assert.equal(nonOpenCodeHeaders.Authorization, 'Bearer test-key');
+
 const payload = {
   model: 'deepseek-v4-pro',
   messages: [],
@@ -236,5 +263,7 @@ assert.match(contentCode, /function stripOpenAiReasoningBlocks/);
 assert.match(contentCode, /<think>\[\\s\\S\]\*\?<\\\/think>/);
 assert.match(contentCode, /function translateWithQwenMt/);
 assert.match(contentCode, /translation_options/);
+assert.match(contentCode, /function buildOpenAiCompatibleHeaders/);
+assert.match(contentCode, /x-opencode-session/);
 
 console.log('OpenAI compatible config tests passed.');
