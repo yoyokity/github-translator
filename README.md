@@ -35,12 +35,14 @@
 <summary><kbd>目录树</kbd></summary>
 
 #### TOC
+
 - [🌟 功能特性](#-功能特性)
 - [🔒 隐私与数据](#-隐私与数据)
 - [💻 安装指南](#-安装指南)
 - [🔧 本地调试](#-本地调试)
 - [🔄 更新日志](#-更新日志)
 - [📖 开源说明](#-开源说明)
+
 </details>
 
 <div align="center">
@@ -62,7 +64,7 @@
 - 弹窗提供总开关；切换后若当前标签页为 GitHub 页面，将自动刷新并立即生效
 - 支持翻译记录、缓存复用与分段渐进翻译（可在设置中按需开启）；记录会标注来源为 README、Issue、Pull Request 或 Release
 - DeepL 与 Google Cloud Translation 使用官方 JSON 请求格式；Azure 单服务 Global 资源可不填写 Region，多服务或区域资源仍需填写
-- 提供 Chrome、Edge、Firefox 三套浏览器扩展目录，便于按浏览器加载
+- 源码统一维护，运行 `vp run build` 生成 `dist/chrome`、`dist/edge`、`dist/firefox` 三套可加载目录
 
 ## 🔒 隐私与数据
 
@@ -105,14 +107,15 @@
 1. Chrome 打开 `chrome://extensions/`；Edge 打开 `edge://extensions/`
 1. 开启右上角 `开发者模式`
 1. 点击 `加载已解压的扩展程序`
-1. Chrome 选择本仓库的 `chrome` 目录；Edge 选择本仓库的 `edge` 目录
+1. 先运行 `vp install && vp run build` 生成三端产物
+1. Chrome 选择 `dist/chrome` 目录；Edge 选择 `dist/edge` 目录
 1. 确认扩展已启用后，刷新 GitHub 页面
 
 ### 临时加载（Firefox）
 
 1. 打开 `about:debugging#/runtime/this-firefox`
 1. 点击 `临时载入附加组件`
-1. 选择本仓库 `firefox/manifest.json`
+1. 选择 `dist/firefox/manifest.json`（需先运行 `vp run build`）
 1. 确认扩展已启用后，刷新 GitHub 页面
 
 <div align="right">
@@ -123,10 +126,23 @@
 
 ## 🔧 本地调试
 
-1. 克隆本仓库到本地
-1. Chrome / Edge 在扩展管理页开启 `开发者模式`，加载 `chrome` 或 `edge` 目录
-1. Firefox 在 `about:debugging#/runtime/this-firefox` 中临时载入 `firefox/manifest.json`
-1. 修改对应浏览器目录下的 `locals.js` 后，在扩展管理页点击刷新按钮即可生效
+1. 克隆本仓库并安装依赖：`vp install`
+1. 构建三端产物：`vp run build`，生成 `dist/chrome`、`dist/edge`、`dist/firefox`
+1. Chrome / Edge 在扩展管理页开启 `开发者模式`，分别加载 `dist/chrome` 或 `dist/edge`
+1. Firefox 在 `about:debugging#/runtime/this-firefox` 中临时载入 `dist/firefox/manifest.json`
+1. 修改 `src/` 下的 TypeScript 源码后重新运行 `vp run build`；`dist/` 是构建产物，请勿手改
+
+### 构建与测试
+
+所有命令都定义在 `vite.config.ts` 的 `run.tasks` 中，通过 Vite+ 任务运行：
+
+- `vp run build`：打包 content / locals / background / popup / options，并组装三端目录
+- `vp run test`：先执行构建任务，再运行 Vitest（内部调用 `vp test run`）
+- `vp run check`：Oxfmt + Oxlint + TypeScript 严格类型检查
+- `vp run fmt`：格式化源码
+- `vp run lint`：只运行 Oxlint
+- VS Code 任务面板（Terminal → Run Task）提供对应中文任务
+- 需要 Node `^22.18.0 || ^24.11.0 || >=26.0.0`，依赖安装与任务运行统一使用 `vp`（底层自动调用项目包管理器）
 
 ## 🔄 更新日志
 
@@ -439,16 +455,15 @@
 
 </div>
 
-
 <!-- LINK GROUP -->
 
 [back-to-top]: https://img.shields.io/badge/-BACK_TO_TOP-151515?style=flat-square
-[github-project-link]: https://github.com/MaydayV/github-chinese "GitHub 中文汉化翻译插件"
-[github-issues-link]: https://github.com/MaydayV/github-chinese/issues "议题"
+[github-project-link]: https://github.com/MaydayV/github-chinese 'GitHub 中文汉化翻译插件'
+[github-issues-link]: https://github.com/MaydayV/github-chinese/issues '议题'
 [github-issues-shield]: https://img.shields.io/github/issues/MaydayV/github-chinese?style=flat-square&logo=github&label=Issue
-[github-stars-link]: https://github.com/MaydayV/github-chinese/stargazers "星标"
+[github-stars-link]: https://github.com/MaydayV/github-chinese/stargazers '星标'
 [github-stars-shield]: https://img.shields.io/github/stars/MaydayV/github-chinese?style=flat-square&logo=github&label=Star
-[github-forks-link]: https://github.com/MaydayV/github-chinese/network "复刻"
+[github-forks-link]: https://github.com/MaydayV/github-chinese/network '复刻'
 [github-forks-shield]: https://img.shields.io/github/forks/MaydayV/github-chinese?style=flat-square&logo=github&label=Fork
-[github-license-link]: https://opensource.org/licenses/GPL-3.0  "许可证"
+[github-license-link]: https://opensource.org/licenses/GPL-3.0 '许可证'
 [github-license-shield]: https://img.shields.io/github/license/MaydayV/github-chinese?style=flat-square&logo=github&label=License

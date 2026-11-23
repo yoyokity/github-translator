@@ -1,0 +1,93 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "🔨 构建三端产物",
+            "detail": "运行 vp run build，生成 dist/chrome、dist/edge、dist/firefox",
+            "type": "shell",
+            "command": "vp",
+            "args": ["run", "build"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🧪 运行测试",
+            "detail": "先执行构建，再运行 vp test run（Vitest）",
+            "type": "shell",
+            "command": "vp",
+            "args": ["run", "test"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "✅ 代码检查（格式 / Lint / 类型）",
+            "detail": "运行 vp run check，对应 Oxfmt、Oxlint 与 TypeScript 严格检查",
+            "type": "shell",
+            "command": "vp",
+            "args": ["run", "check"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🎨 格式化代码",
+            "detail": "运行 vp run fmt，使用 Oxfmt 格式化源码",
+            "type": "shell",
+            "command": "vp",
+            "args": ["run", "fmt"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "🔎 Lint 检查",
+            "detail": "运行 vp run lint，只执行 Oxlint",
+            "type": "shell",
+            "command": "vp",
+            "args": ["run", "lint"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}

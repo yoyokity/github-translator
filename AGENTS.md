@@ -6,51 +6,67 @@ GitHub 汉化与开源协作套件，浏览器扩展，支持 Chrome / Edge / Fi
 
 核心能力：本地词库界面汉化、README / Issue / PR / Discussions 双语翻译、开源协作 AI 润色助手、仓库首页 TL;DR 速读胶囊。
 
-零第三方运行时依赖，无打包器，用 Node.js 脚本直接拼装产物。
+技术栈：Vite+（`vp`：Vite 8 + Rolldown + Vitest + Oxlint/Oxfmt）+ TypeScript。源码只维护一份，构建生成三端产物。运行时零第三方依赖，开发依赖通过 `vp install` 安装。
 
 ## 目录结构
 
 ```text
-chrome/src/             唯一源码目录（按构建顺序拼装）
-├── core/               constants、utils、storage-cache、text-filter、dom-observer
-├── providers/          provider-config、cloud-translators、dispatcher
+src/                    唯一源码目录
+├── content.ts          content script 入口（init 与消息监听）
+├── core/               constants、state、utils、storage-cache、
+│                       text-filter、dom-observer、translation-shared
+├── providers/          provider-config、cloud-translators、dispatcher、shared
 ├── features/           ui-localization、markdown-translation、
 │                       discussion-translation、collaboration-helper、tldr-capsule
-└── entry.js            生命周期入口
-chrome/content.js       构建产物（勿手改）
-edge/content.js         构建产物（勿手改）
-firefox/content.js      构建产物（勿手改）
-chrome/tests/*.mjs      功能与回归测试
-script/                 build.js 与辅助测试脚本
-docs/ROADMAP-v3.md      v3 产品演进规划（背景资料，非规范）
+├── locals/             index.ts（词库）、entry.ts（挂载全局 I18N）
+├── background.ts       后台入口
+├── ui/                 popup / options 的 ts、html、css（三端共用）
+├── manifests/          base / chromium / firefox 模板
+├── assets/icons/       三端共用图标
+└── types/              i18n 与全局类型声明
+script/build.mjs        多入口构建 + 三端组装 + 产物校验
+script/manifest.mjs     manifest 深合并与版本注入
+tests/                  Vitest 测试
+.vscode/tasks.json      VS Code 中文任务（调用 vp run）
+vite.config.ts          Vite+ run tasks / test / lint / fmt 配置
+tsconfig.json           strict TypeScript
+dist/                   构建产物（不提交）
 ```
 
 ## 构建
 
 ```bash
-npm run build              # 等价于 node script/build.js
-node script/build.js --check   # 只校验三端产物与源码是否同步
+vp install
+vp run build
 ```
 
-`script/build.js` 按 `MODULES` 数组顺序拼接 `chrome/src/` 下的片段，并在外层包一个 IIFE。
-
-- **新增源文件必须登记到 `script/build.js` 的 `MODULES` 数组**，顺序即执行顺序。
-- 构建时会剥离每个文件顶部的 `/** @file ... */` docblock，并按模块插入分隔注释。
-- 构建后用 `vm.Script` 做语法校验，失败会以非零码退出。
+- 构建 / 测试 / 检查 / 格式化 / Lint 全部定义在 `vite.config.ts` 的 `run.tasks` 中，`package.json` 不再维护同名 scripts；统一用 `vp run <task>`。
+- `vp run build` 执行 `script/build.mjs`：用 Vite 的 `build()` API 依次打包 5 个固定文件名入口到临时目录，再组装 `dist/chrome`、`dist/edge`、`dist/firefox`。
+- 产物文件名、目录与加载顺序被 manifest / HTML 固定引用，**禁止加 hash 或改路径**。
+- `dist/` 不提交，禁止手改；修改源码后重新构建。
+- 新增构建入口时必须登记到 `script/build.mjs` 的 `ENTRIES`；普通模块由 import 图自动打包。
+- manifest 共享字段放 `src/manifests/base.json`，端差异放 `chromium.json` / `firefox.json`；版本号由构建从 `package.json` 注入。
+- `vp build` 只是 Vite 单次构建，不负责三端组装；统一用 `vp run build`。
+- `.vscode/tasks.json` 提供与上述任务一一对应的中文标签任务。
 
 ## 测试
 
 ```bash
-npm test
+vp run test
 ```
 
-依次执行：`build.js --check` → `chrome/tests/issue-pr-translation.test.mjs` → `chrome/tests/upstream-regressions.test.mjs` → `script/test-options-features.js` → `test-openai-compatible-config.js` → `test-readme-features.js` → `test-popup-version.js` → `test-upstream-sync.js`。
+- `vp run test` 先执行 `build` 依赖任务，再通过 `vp test run` 运行 Vitest。
+- 测试位于 `tests/*.test.ts`，使用 happy-dom 与 `tests/setup.ts` 的 chrome mock；直接 import `src/` 模块，**禁止对构建产物做文本或函数名断言**。
+- 覆盖：词库回归、provider 协议与预设、README 工具、options 核心规则、讨论区翻译、协作 / TLDR、manifest / 版本、三端产物完整性。
+- `tests/build-output.test.ts` 依赖先构建好的 `dist/`。
 
 ## 编码约定
 
-- `chrome/src/` 下的文件是**共享作用域的 IIFE 片段**，不是 ES 模块：不要写 `import` / `export`，直接定义函数与常量。
-- 文件顶部保留 `/** @file 路径 + 一句中文说明 */` 风格注释。
-- 缩进 4 空格，保持与现有源码一致。
-- 修改源码后必须运行 `npm run build` 同步三端 `content.js`；**禁止直接编辑 `content.js`**，`--check` 会拦截。
-- 三端中非构建文件（`locals.js`、`background.js`、`options/`、`popup/`）不自动同步，改动需手动保持一致。已知有意差异：`firefox/manifest.json`（MV2 background scripts + gecko 配置）和 `firefox/options/options.js`。
+- `src/` 是 ESM TypeScript，不是共享作用域片段：使用 `import` / `export`，不写 IIFE / `require`。
+- 缩进 4 空格、单引号；提交前运行 `vp run check`。
+- 运行期可变状态（`pageConfig`、刷新回调、定时器）统一放 `src/core/state.ts`，避免 ESM 导入绑定不可赋值。
+- 词库 `src/locals/index.ts` 是上游同步数据，文件头保留 `@ts-nocheck`；保留重复键“后者覆盖”语义与正则字面量，不要用 `as const`。
+- `src/locals/entry.ts` 负责把 `I18N` 挂到 `globalThis`；manifest 仍按 `locals.js` → `content.js` 顺序加载。
+- 三端共用同一份 popup / options / background / content 源码；端差异只体现在 manifest 模板与构建组装。
+- Chrome API 统一使用 `chrome.*`（Firefox 同样支持），类型来自 `@types/chrome`。
 - 提交信息沿用现有风格：`fix: ...`、`docs: ...`、`chore: ...`、`release: ...`。
